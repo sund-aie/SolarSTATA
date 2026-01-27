@@ -109,7 +109,8 @@ def upload_file():
         elif ext == "tsv" or ext == "txt":
             df = pd.read_csv(filepath, sep="\t")
         elif ext in ("xlsx", "xls"):
-            df = pd.read_excel(filepath)
+            df = pd.read_excel(filepath, header=None)
+            # Flatten: read without header so merged cells don't create MultiIndex
         elif ext == "dta":
             df = pd.read_stata(filepath)
         else:

@@ -138,6 +138,7 @@ def analyze_data_structure(df):
     """
     Intelligently analyze a dataframe to understand its structure,
     variable types, and suggest appropriate statistical tests.
+    Uses positional indexing throughout to handle duplicate column names.
     """
     info = se.detect_variable_types(df)
     n_rows, n_cols = df.shape
@@ -145,43 +146,67 @@ def analyze_data_structure(df):
     categorical_cols = info[info["Type"] == "categorical"]["Variable"].tolist()
     continuous_cols = info[info["Type"] == "continuous"]["Variable"].tolist()
 
-    # Detect potential grouping variables
+    # Detect potential grouping variables (use iloc for safety)
     group_candidates = []
-    for col in df.columns:
-        nunique = df[col].nunique()
-        if 2 <= nunique <= 20:
-            group_candidates.append({"column": col, "n_groups": nunique,
-                                     "groups": df[col].unique().tolist()[:10]})
+    for i, col in enumerate(df.columns):
+        try:
+            col_series = df.iloc[:, i]
+            nunique = int(col_series.nunique())
+            if 2 <= nunique <= 20:
+                unique_vals = col_series.dropna().unique().tolist()[:10]
+                # Convert numpy types to native Python for JSON serialization
+                unique_vals = [str(v) if not isinstance(v, (int, float, str)) else v
+                               for v in unique_vals]
+                group_candidates.append({
+                    "column": str(col), "n_groups": nunique,
+                    "groups": unique_vals,
+                })
+        except Exception:
+            pass
 
     # Detect potential outcome variables (continuous with high unique count)
-    outcome_candidates = [c for c in continuous_cols if df[c].nunique() > 10]
+    outcome_candidates = []
+    for c in continuous_cols:
+        try:
+            col_idx = list(df.columns).index(c)
+            if int(df.iloc[:, col_idx].nunique()) > 10:
+                outcome_candidates.append(c)
+        except Exception:
+            pass
 
     # Detect potential time variables
     time_candidates = []
     for col in df.columns:
-        col_lower = col.lower()
+        col_lower = str(col).lower()
         if any(t in col_lower for t in ["time", "date", "day", "week", "month", "year",
                                          "baseline", "follow", "pre", "post"]):
-            time_candidates.append(col)
+            time_candidates.append(str(col))
 
     # Detect paired/repeated measures structure
-    has_repeated = False
-    if any("time" in c.lower() or "visit" in c.lower() or "day" in c.lower()
-           for c in df.columns):
-        has_repeated = True
+    has_repeated = any(
+        any(t in str(c).lower() for t in ["time", "visit", "day", "baseline", "immersion"])
+        for c in df.columns
+    )
+
+    # Build missing summary using iloc
+    missing_summary = {}
+    for i, col in enumerate(df.columns):
+        n_miss = int(df.iloc[:, i].isna().sum())
+        if n_miss > 0:
+            missing_summary[str(col)] = n_miss
 
     return {
         "n_observations": n_rows,
         "n_variables": n_cols,
-        "numeric_columns": numeric_cols,
-        "categorical_columns": categorical_cols,
-        "continuous_columns": continuous_cols,
+        "numeric_columns": [str(c) for c in numeric_cols],
+        "categorical_columns": [str(c) for c in categorical_cols],
+        "continuous_columns": [str(c) for c in continuous_cols],
         "group_candidates": group_candidates,
         "outcome_candidates": outcome_candidates,
         "time_candidates": time_candidates,
         "has_repeated_measures": has_repeated,
         "variable_info": info.to_dict("records"),
-        "missing_summary": df.isnull().sum().to_dict(),
+        "missing_summary": missing_summary,
     }
 
 
@@ -288,12 +313,28 @@ def suggest_tests(data_analysis, proposal_text=""):
 # SMART CLEANING MODULE
 # ---------------------------------------------------------------------------
 
+def _flatten_column(col):
+    """Flatten a column name: handle MultiIndex tuples, Unnamed markers, etc."""
+    if isinstance(col, tuple):
+        # MultiIndex column - join non-empty, non-Unnamed parts
+        parts = []
+        for part in col:
+            s = str(part).strip()
+            if s and s.lower() != "nan" and "unnamed" not in s.lower():
+                parts.append(s)
+        return " - ".join(parts) if parts else f"Col"
+    s = str(col).strip()
+    if s.lower() == "nan" or "unnamed" in s.lower():
+        return "Col"
+    return s
+
+
 def _deduplicate_columns(columns):
-    """Make column names unique by appending _1, _2, etc. to duplicates."""
+    """Flatten and make column names unique by appending _1, _2, etc."""
     seen = {}
     new_cols = []
     for col in columns:
-        col = str(col).strip()
+        col = _flatten_column(col)
         if col in seen:
             seen[col] += 1
             new_cols.append(f"{col}_{seen[col]}")
@@ -303,50 +344,124 @@ def _deduplicate_columns(columns):
     return new_cols
 
 
+def _build_headers_from_rows(df):
+    """
+    For Excel files with merged group headers + sub-headers,
+    scan first rows and build meaningful column names.
+    E.g. Row0='GROUP 1 (COW MILK)', Row1='BASELINE' => 'GROUP 1 (COW MILK) - BASELINE'
+    """
+    if len(df) < 2:
+        return df
+
+    # Check if the first 1-2 rows are header-like (mostly strings, few/no numbers)
+    header_rows = []
+    for row_idx in range(min(3, len(df))):
+        row = df.iloc[row_idx]
+        non_null = row.dropna()
+        if len(non_null) == 0:
+            continue
+        str_count = sum(1 for v in non_null if isinstance(v, str))
+        if str_count / len(non_null) > 0.6:
+            header_rows.append(row_idx)
+        else:
+            break
+
+    if not header_rows:
+        return df
+
+    # Build column names from header rows
+    n_cols = len(df.columns)
+    col_names = [""] * n_cols
+
+    for row_idx in header_rows:
+        row = df.iloc[row_idx]
+        # Forward-fill: merged cells in Excel show value in first col, NaN in rest
+        last_val = ""
+        for i in range(n_cols):
+            val = row.iloc[i]
+            if pd.notna(val) and str(val).strip():
+                last_val = str(val).strip()
+            if last_val:
+                if col_names[i]:
+                    col_names[i] += " - " + last_val
+                else:
+                    col_names[i] = last_val
+
+    # If all column names are empty, fall back
+    if all(c == "" for c in col_names):
+        return df
+
+    # Set new column names and drop header rows
+    df = df.copy()
+    df.columns = col_names
+    df = df.iloc[max(header_rows) + 1:].reset_index(drop=True)
+    return df
+
+
 def smart_clean(df_raw):
     """
     Intelligently clean data regardless of format.
-    Handles wide format, side-by-side groups, messy headers, duplicate columns, etc.
+    Handles wide format, side-by-side groups, messy headers, duplicate columns,
+    MultiIndex columns from merged Excel cells, etc.
     """
     df = df_raw.copy()
 
-    # Step 1: Clean and deduplicate column names (prevents DataFrame-instead-of-Series errors)
+    # Step 0: Flatten MultiIndex columns if present
+    if isinstance(df.columns, pd.MultiIndex):
+        df.columns = [_flatten_column(col) for col in df.columns]
+
+    # Step 1: If columns are just integers (header=None read), build headers from rows
+    if all(isinstance(c, (int, np.integer)) for c in df.columns):
+        df = _build_headers_from_rows(df)
+
+    # Step 2: Deduplicate column names
     df.columns = _deduplicate_columns(df.columns)
 
-    # Step 2: Remove completely empty rows/cols
+    # Step 3: Remove completely empty rows/cols
     df = df.dropna(how="all")
     df = df.dropna(axis=1, how="all")
 
-    # Step 3: If first row looks like a header, promote it
-    first_row = df.iloc[0] if len(df) > 0 else None
-    if first_row is not None:
-        is_header = all(isinstance(v, str) for v in first_row.values if pd.notna(v))
-        if is_header and not all(isinstance(c, str) and "Unnamed" not in c for c in df.columns):
-            new_cols = [str(v) if pd.notna(v) else f"Col_{i}" for i, v in enumerate(first_row)]
-            df.columns = _deduplicate_columns(new_cols)
-            df = df.iloc[1:].reset_index(drop=True)
+    # Step 4: If first row still looks like a header (all strings), promote it
+    if len(df) > 0:
+        first_row = df.iloc[0]
+        non_null = first_row.dropna()
+        if len(non_null) > 0:
+            is_header = all(isinstance(v, str) for v in non_null.values)
+            col_names_are_bad = any("Unnamed" in str(c) or "Col" == str(c) for c in df.columns)
+            if is_header and col_names_are_bad:
+                new_cols = [str(v).strip() if pd.notna(v) else f"Col_{i}" for i, v in enumerate(first_row)]
+                df.columns = _deduplicate_columns(new_cols)
+                df = df.iloc[1:].reset_index(drop=True)
 
-    # Step 4: Clean string values (use iloc to avoid duplicate-column issues)
-    for i in range(len(df.columns)):
-        col_series = df.iloc[:, i]
+    # Step 5 & 6: Clean string values + convert to numeric where possible
+    # Rebuild column-by-column to avoid iloc assignment issues in modern pandas
+    new_data = {}
+    for i, col_name in enumerate(df.columns):
+        col_series = df.iloc[:, i].copy()
+
+        # Clean strings
         if col_series.dtype == object:
-            df.iloc[:, i] = col_series.astype(str).str.strip()
-            df.iloc[:, i] = df.iloc[:, i].replace({"nan": np.nan, "": np.nan, "None": np.nan})
+            col_series = col_series.astype(str).str.strip()
+            col_series = col_series.replace({"nan": np.nan, "": np.nan, "None": np.nan,
+                                              "NaN": np.nan, "none": np.nan, "NaT": np.nan})
 
-    # Step 5: Try numeric conversion where possible
-    for i in range(len(df.columns)):
+        # Try numeric conversion
         try:
-            numeric_col = pd.to_numeric(df.iloc[:, i], errors="coerce")
+            numeric_col = pd.to_numeric(col_series, errors="coerce")
             if numeric_col.notna().sum() / max(len(df), 1) > 0.5:
-                df.iloc[:, i] = numeric_col
+                col_series = numeric_col
         except Exception:
             pass
 
-    # Step 6: Remove duplicate rows
-    df = df.drop_duplicates()
+        new_data[col_name] = col_series.values
 
-    # Step 7: Ensure column names are still unique after all transforms
-    df.columns = _deduplicate_columns(df.columns)
+    df = pd.DataFrame(new_data)
+
+    # Step 7: Remove duplicate rows
+    df = df.drop_duplicates().reset_index(drop=True)
+
+    # Step 8: Final deduplication of column names
+    df.columns = _deduplicate_columns(list(df.columns))
 
     return df
 
