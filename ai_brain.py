@@ -288,15 +288,30 @@ def suggest_tests(data_analysis, proposal_text=""):
 # SMART CLEANING MODULE
 # ---------------------------------------------------------------------------
 
+def _deduplicate_columns(columns):
+    """Make column names unique by appending _1, _2, etc. to duplicates."""
+    seen = {}
+    new_cols = []
+    for col in columns:
+        col = str(col).strip()
+        if col in seen:
+            seen[col] += 1
+            new_cols.append(f"{col}_{seen[col]}")
+        else:
+            seen[col] = 0
+            new_cols.append(col)
+    return new_cols
+
+
 def smart_clean(df_raw):
     """
     Intelligently clean data regardless of format.
-    Handles wide format, side-by-side groups, messy headers, etc.
+    Handles wide format, side-by-side groups, messy headers, duplicate columns, etc.
     """
     df = df_raw.copy()
 
-    # Step 1: Clean column names
-    df.columns = [str(c).strip() for c in df.columns]
+    # Step 1: Clean and deduplicate column names (prevents DataFrame-instead-of-Series errors)
+    df.columns = _deduplicate_columns(df.columns)
 
     # Step 2: Remove completely empty rows/cols
     df = df.dropna(how="all")
@@ -307,29 +322,31 @@ def smart_clean(df_raw):
     if first_row is not None:
         is_header = all(isinstance(v, str) for v in first_row.values if pd.notna(v))
         if is_header and not all(isinstance(c, str) and "Unnamed" not in c for c in df.columns):
-            df.columns = [str(v) if pd.notna(v) else f"Col_{i}" for i, v in enumerate(first_row)]
+            new_cols = [str(v) if pd.notna(v) else f"Col_{i}" for i, v in enumerate(first_row)]
+            df.columns = _deduplicate_columns(new_cols)
             df = df.iloc[1:].reset_index(drop=True)
 
-    # Step 4: Clean string values
-    for col in df.columns:
-        if df[col].dtype == object:
-            df[col] = df[col].astype(str).str.strip()
-            df[col] = df[col].replace({"nan": np.nan, "": np.nan, "None": np.nan})
+    # Step 4: Clean string values (use iloc to avoid duplicate-column issues)
+    for i in range(len(df.columns)):
+        col_series = df.iloc[:, i]
+        if col_series.dtype == object:
+            df.iloc[:, i] = col_series.astype(str).str.strip()
+            df.iloc[:, i] = df.iloc[:, i].replace({"nan": np.nan, "": np.nan, "None": np.nan})
 
     # Step 5: Try numeric conversion where possible
-    for col in df.columns:
+    for i in range(len(df.columns)):
         try:
-            numeric_col = pd.to_numeric(df[col], errors="coerce")
+            numeric_col = pd.to_numeric(df.iloc[:, i], errors="coerce")
             if numeric_col.notna().sum() / max(len(df), 1) > 0.5:
-                df[col] = numeric_col
+                df.iloc[:, i] = numeric_col
         except Exception:
             pass
 
     # Step 6: Remove duplicate rows
     df = df.drop_duplicates()
 
-    # Step 7: Standardize column names (no spaces, lowercase-safe)
-    df.columns = [c.strip().replace("  ", " ") for c in df.columns]
+    # Step 7: Ensure column names are still unique after all transforms
+    df.columns = _deduplicate_columns(df.columns)
 
     return df
 
