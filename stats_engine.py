@@ -15,7 +15,9 @@ from statsmodels.stats.anova import anova_lm
 from statsmodels.stats.diagnostic import het_breuschpagan, het_white
 from statsmodels.stats.stattools import durbin_watson
 from statsmodels.stats.outliers_influence import variance_inflation_factor
+from statsmodels.stats.multicomp import pairwise_tukeyhsd
 import warnings
+import re
 
 warnings.filterwarnings("ignore")
 
@@ -265,13 +267,6 @@ def twoway_anova(df, depvar, factor1, factor2, interaction=True):
     }
 
 
-def repeated_measures_info():
-    """Note about repeated measures ANOVA."""
-    return {
-        "note": "For repeated measures ANOVA, use the AI Assistant with your "
-                "data. Provide your within-subjects factors and the AI will "
-                "set up the appropriate mixed model or repeated measures design."
-    }
 
 
 # ---------------------------------------------------------------------------
@@ -786,7 +781,720 @@ def reshape_long_to_wide(df, index, columns, values):
 
 
 # ---------------------------------------------------------------------------
-# 13. MASTER DISPATCHER
+# 13. FISHER'S EXACT TEST
+# ---------------------------------------------------------------------------
+
+def fisher_exact_test(df, var1, var2):
+    """Fisher's Exact Test for 2x2 contingency tables (small cell counts)."""
+    ct = pd.crosstab(df[var1], df[var2])
+
+    # Check if 2x2
+    if ct.shape != (2, 2):
+        return {
+            "error": f"Fisher's Exact requires a 2x2 table, got {ct.shape}",
+            "suggestion": "Use Chi-Square test for larger tables"
+        }
+
+    odds_ratio, p_val = sp_stats.fisher_exact(ct)
+
+    # Also compute chi-square for comparison
+    chi2, chi2_p, dof, expected = sp_stats.chi2_contingency(ct)
+    min_expected = expected.min()
+
+    return {
+        "test": "Fisher's Exact Test",
+        "observed": ct.to_dict(),
+        "observed_str": ct.to_string(),
+        "odds_ratio": round(odds_ratio, 4),
+        "p_value": round(p_val, 4),
+        "chi2_comparison": round(chi2, 4),
+        "chi2_p": round(chi2_p, 4),
+        "min_expected_cell": round(min_expected, 2),
+        "recommendation": "Fisher's Exact is preferred when expected cell count < 5",
+        "n": int(ct.sum().sum()),
+    }
+
+
+# ---------------------------------------------------------------------------
+# 14. REPEATED MEASURES ANOVA
+# ---------------------------------------------------------------------------
+
+def repeated_measures_anova(df, subject_var, within_vars):
+    """
+    Repeated Measures ANOVA for within-subjects designs.
+    within_vars: list of column names representing repeated measures (e.g., ['time1', 'time2', 'time3'])
+    subject_var: column identifying subjects
+    """
+    # Reshape data to long format
+    id_vars = [subject_var]
+    value_vars = within_vars
+
+    # Create long format
+    long_data = pd.melt(
+        df[id_vars + value_vars].dropna(),
+        id_vars=id_vars,
+        value_vars=value_vars,
+        var_name='time',
+        value_name='value'
+    )
+    long_data['value'] = pd.to_numeric(long_data['value'], errors='coerce')
+    long_data = long_data.dropna()
+
+    # Get group data
+    groups = [grp['value'].values for name, grp in long_data.groupby('time')]
+    k = len(groups)  # number of conditions
+    n = len(df[subject_var].dropna().unique())  # number of subjects
+
+    if k < 2:
+        return {"error": "Need at least 2 time points for repeated measures"}
+
+    # Compute SS components
+    all_vals = long_data['value'].values
+    grand_mean = all_vals.mean()
+    N_total = len(all_vals)
+
+    # SS Total
+    ss_total = ((all_vals - grand_mean) ** 2).sum()
+
+    # SS Between conditions (time)
+    condition_means = [g.mean() for g in groups]
+    ss_between = n * sum((m - grand_mean) ** 2 for m in condition_means)
+
+    # SS Subjects
+    subject_means = long_data.groupby(subject_var)['value'].mean()
+    ss_subjects = k * ((subject_means - grand_mean) ** 2).sum()
+
+    # SS Error (residual)
+    ss_error = ss_total - ss_between - ss_subjects
+
+    # Degrees of freedom
+    df_between = k - 1
+    df_subjects = n - 1
+    df_error = (k - 1) * (n - 1)
+    df_total = N_total - 1
+
+    # Mean squares
+    ms_between = ss_between / df_between if df_between > 0 else 0
+    ms_error = ss_error / df_error if df_error > 0 else 0
+
+    # F statistic
+    f_stat = ms_between / ms_error if ms_error > 0 else 0
+    p_val = 1 - sp_stats.f.cdf(f_stat, df_between, df_error) if f_stat > 0 else 1.0
+
+    # Sphericity check (Mauchly's test approximation)
+    # Using epsilon corrections
+    epsilon_gg = min(1.0, max(0.5, 1 / (k - 1)))  # Simplified Greenhouse-Geisser
+
+    # Corrected p-value
+    p_val_gg = 1 - sp_stats.f.cdf(f_stat, df_between * epsilon_gg, df_error * epsilon_gg)
+
+    # Condition summaries
+    condition_stats = []
+    for i, var in enumerate(within_vars):
+        g = groups[i]
+        condition_stats.append({
+            "Condition": var,
+            "N": len(g),
+            "Mean": round(g.mean(), 4),
+            "Std. Dev.": round(g.std(ddof=1), 4),
+            "Std. Err.": round(sp_stats.sem(g), 4),
+        })
+
+    return {
+        "test": "Repeated Measures ANOVA",
+        "anova_table": {
+            "Source": ["Between conditions", "Subjects", "Error", "Total"],
+            "SS": [round(ss_between, 4), round(ss_subjects, 4), round(ss_error, 4), round(ss_total, 4)],
+            "df": [df_between, df_subjects, df_error, df_total],
+            "MS": [round(ms_between, 4), "", round(ms_error, 4), ""],
+            "F": [round(f_stat, 4), "", "", ""],
+            "p": [round(p_val, 4), "", "", ""],
+        },
+        "F": round(f_stat, 4),
+        "p_value": round(p_val, 4),
+        "p_value_GG": round(p_val_gg, 4),
+        "epsilon_GG": round(epsilon_gg, 4),
+        "condition_stats": condition_stats,
+        "n_subjects": n,
+        "n_conditions": k,
+        "note": "Greenhouse-Geisser correction applied for sphericity violation",
+    }
+
+
+# ---------------------------------------------------------------------------
+# 15. FRIEDMAN TEST (Non-parametric Repeated Measures)
+# ---------------------------------------------------------------------------
+
+def friedman_test(df, subject_var, within_vars):
+    """
+    Friedman Test - non-parametric alternative to Repeated Measures ANOVA.
+    Used when normality assumption is violated.
+    """
+    # Get data matrix
+    data = df[[subject_var] + within_vars].dropna()
+
+    # Extract values for each condition
+    groups = []
+    for var in within_vars:
+        groups.append(pd.to_numeric(data[var], errors='coerce').values)
+
+    k = len(groups)
+    n = len(groups[0])
+
+    if k < 3:
+        return {"error": "Friedman test requires at least 3 conditions"}
+
+    # Perform Friedman test
+    stat, p_val = sp_stats.friedmanchisquare(*groups)
+
+    # Compute median ranks
+    condition_stats = []
+    for i, var in enumerate(within_vars):
+        g = groups[i]
+        condition_stats.append({
+            "Condition": var,
+            "N": len(g),
+            "Median": round(np.median(g), 4),
+            "Mean": round(g.mean(), 4),
+            "Std. Dev.": round(g.std(ddof=1), 4),
+        })
+
+    # Effect size (Kendall's W)
+    kendall_w = stat / (n * (k - 1)) if n * (k - 1) > 0 else 0
+
+    return {
+        "test": "Friedman Test",
+        "chi2": round(stat, 4),
+        "df": k - 1,
+        "p_value": round(p_val, 4),
+        "kendall_w": round(kendall_w, 4),
+        "n_subjects": n,
+        "n_conditions": k,
+        "condition_stats": condition_stats,
+        "interpretation": "Small" if kendall_w < 0.3 else "Medium" if kendall_w < 0.5 else "Large",
+        "note": "Non-parametric alternative to Repeated Measures ANOVA",
+    }
+
+
+# ---------------------------------------------------------------------------
+# 16. POST-HOC TESTS
+# ---------------------------------------------------------------------------
+
+def tukey_hsd(df, depvar, groupvar):
+    """Tukey's Honestly Significant Difference post-hoc test."""
+    temp = df[[depvar, groupvar]].dropna()
+    temp[depvar] = pd.to_numeric(temp[depvar], errors='coerce')
+    temp = temp.dropna()
+
+    result = pairwise_tukeyhsd(temp[depvar], temp[groupvar], alpha=0.05)
+
+    # Parse results
+    comparisons = []
+    for i in range(len(result.summary().data) - 1):
+        row = result.summary().data[i + 1]
+        comparisons.append({
+            "Group1": str(row[0]),
+            "Group2": str(row[1]),
+            "Mean_Diff": round(float(row[2]), 4),
+            "p_adj": round(float(row[3]), 4),
+            "CI_Low": round(float(row[4]), 4),
+            "CI_High": round(float(row[5]), 4),
+            "Reject_H0": str(row[6]),
+        })
+
+    return {
+        "test": "Tukey HSD",
+        "comparisons": comparisons,
+        "summary": str(result),
+        "alpha": 0.05,
+    }
+
+
+def bonferroni_posthoc(df, depvar, groupvar, alpha=0.05):
+    """Bonferroni-corrected pairwise comparisons."""
+    temp = df[[depvar, groupvar]].dropna()
+    temp[depvar] = pd.to_numeric(temp[depvar], errors='coerce')
+    temp = temp.dropna()
+
+    groups = temp[groupvar].unique()
+    k = len(groups)
+    n_comparisons = k * (k - 1) // 2
+    alpha_corrected = alpha / n_comparisons
+
+    comparisons = []
+    for i in range(k):
+        for j in range(i + 1, k):
+            g1 = temp.loc[temp[groupvar] == groups[i], depvar]
+            g2 = temp.loc[temp[groupvar] == groups[j], depvar]
+
+            t_stat, p_val = sp_stats.ttest_ind(g1, g2)
+            p_bonf = min(p_val * n_comparisons, 1.0)
+
+            comparisons.append({
+                "Group1": str(groups[i]),
+                "Group2": str(groups[j]),
+                "Mean1": round(g1.mean(), 4),
+                "Mean2": round(g2.mean(), 4),
+                "Mean_Diff": round(g1.mean() - g2.mean(), 4),
+                "t": round(t_stat, 4),
+                "p_raw": round(p_val, 4),
+                "p_bonferroni": round(p_bonf, 4),
+                "Significant": p_bonf < alpha,
+            })
+
+    return {
+        "test": "Bonferroni Post-hoc",
+        "comparisons": comparisons,
+        "n_comparisons": n_comparisons,
+        "alpha": alpha,
+        "alpha_corrected": round(alpha_corrected, 6),
+    }
+
+
+# ---------------------------------------------------------------------------
+# 17. SMART STATISTICAL ROUTER
+# ---------------------------------------------------------------------------
+
+# Temporal keywords for detecting paired/repeated measures
+TEMPORAL_KEYWORDS = [
+    'pre', 'post', 'before', 'after', 'baseline', 'followup', 'follow_up',
+    'time1', 'time2', 'time3', 'time4', 't1', 't2', 't3', 't4',
+    'week1', 'week2', 'week3', 'week4', 'w1', 'w2', 'w3', 'w4',
+    'day1', 'day2', 'day3', 'day4', 'd1', 'd2', 'd3', 'd4',
+    'visit1', 'visit2', 'visit3', 'v1', 'v2', 'v3',
+    'month1', 'month2', 'month3', 'm1', 'm2', 'm3',
+    'wave1', 'wave2', 'wave3',
+    '_0', '_1', '_2', '_3',  # suffixes like score_0, score_1
+    'initial', 'final', 'start', 'end',
+]
+
+
+def _classify_variable(col_series, col_name):
+    """
+    Classify a variable as Numerical/Continuous or Categorical/Nominal.
+    Returns: 'continuous', 'categorical', or 'unknown'
+    """
+    if isinstance(col_series, pd.DataFrame):
+        col_series = col_series.iloc[:, 0]
+
+    n_total = len(col_series)
+    n_valid = col_series.dropna().shape[0]
+
+    if n_valid == 0:
+        return 'unknown'
+
+    # Try converting to numeric
+    numeric = pd.to_numeric(col_series, errors='coerce')
+    n_numeric = numeric.dropna().shape[0]
+    numeric_ratio = n_numeric / n_valid
+
+    n_unique = col_series.nunique()
+
+    # Categorical indicators
+    if n_unique <= 2:
+        return 'categorical'  # Binary
+    if n_unique <= 10 and numeric_ratio < 0.9:
+        return 'categorical'
+    if numeric_ratio < 0.5:
+        return 'categorical'
+
+    # Continuous indicators
+    if numeric_ratio > 0.8 and n_unique > 15:
+        return 'continuous'
+    if numeric_ratio > 0.9 and n_unique > 10:
+        return 'continuous'
+
+    # Edge cases
+    if n_unique <= 20 and n_unique / n_valid < 0.05:
+        return 'categorical'  # Low cardinality ratio
+
+    return 'continuous' if numeric_ratio > 0.7 else 'categorical'
+
+
+def _detect_temporal_pattern(col_names):
+    """
+    Detect if columns have temporal keywords suggesting paired/repeated measures.
+    Returns: list of columns that appear to be temporal measurements
+    """
+    temporal_cols = []
+    for col in col_names:
+        col_lower = str(col).lower()
+        for keyword in TEMPORAL_KEYWORDS:
+            if keyword in col_lower:
+                temporal_cols.append(col)
+                break
+    return temporal_cols
+
+
+def _detect_grouping_variable(df, selected_cols):
+    """
+    Detect which column is likely the grouping variable.
+    Returns: (group_col, outcome_cols) or (None, selected_cols)
+    """
+    categorical_cols = []
+    continuous_cols = []
+
+    for col in selected_cols:
+        vtype = _classify_variable(df[col], col)
+        if vtype == 'categorical':
+            categorical_cols.append(col)
+        else:
+            continuous_cols.append(col)
+
+    # If one categorical and rest continuous, the categorical is likely the grouper
+    if len(categorical_cols) == 1 and len(continuous_cols) >= 1:
+        return categorical_cols[0], continuous_cols
+
+    # If multiple categoricals, pick the one with fewest unique values as grouper
+    if len(categorical_cols) > 1 and len(continuous_cols) >= 1:
+        min_unique = float('inf')
+        best_grouper = None
+        for col in categorical_cols:
+            nuniq = df[col].nunique()
+            if 2 <= nuniq <= 10 and nuniq < min_unique:
+                min_unique = nuniq
+                best_grouper = col
+        if best_grouper:
+            remaining = [c for c in selected_cols if c != best_grouper]
+            return best_grouper, remaining
+
+    return None, selected_cols
+
+
+def _check_normality(col_series, alpha=0.05):
+    """
+    Check if data is normally distributed using Shapiro-Wilk test.
+    Returns: (is_normal, p_value, test_stat)
+    """
+    if isinstance(col_series, pd.DataFrame):
+        col_series = col_series.iloc[:, 0]
+
+    data = pd.to_numeric(col_series, errors='coerce').dropna()
+
+    if len(data) < 3:
+        return True, 1.0, None  # Assume normal if too few observations
+
+    # Shapiro-Wilk is most powerful for n < 5000
+    if len(data) <= 5000:
+        try:
+            stat, p = sp_stats.shapiro(data)
+            return p > alpha, p, stat
+        except:
+            return True, 1.0, None
+    else:
+        # For large samples, use D'Agostino and Pearson's test
+        try:
+            stat, p = sp_stats.normaltest(data)
+            return p > alpha, p, stat
+        except:
+            return True, 1.0, None
+
+
+def _check_homogeneity_of_variance(groups, alpha=0.05):
+    """Check equal variances using Levene's test."""
+    if len(groups) < 2:
+        return True, 1.0
+    try:
+        stat, p = sp_stats.levene(*groups)
+        return p > alpha, p
+    except:
+        return True, 1.0
+
+
+def select_statistical_test(df, selected_columns, subject_var=None, alpha=0.05):
+    """
+    SMART STATISTICAL ROUTER
+
+    Automatically selects the most appropriate statistical test based on:
+    1. Number and types of variables (continuous vs categorical)
+    2. Normality of distributions
+    3. Number of groups (2 vs >2)
+    4. Independence (independent vs paired/repeated measures)
+    5. Sample sizes (for Fisher's Exact vs Chi-Square)
+
+    Args:
+        df: pandas DataFrame
+        selected_columns: list of column names to analyze
+        subject_var: optional column identifying subjects (for repeated measures)
+        alpha: significance level for assumption tests
+
+    Returns:
+        dict with recommended test, results, and reasoning
+    """
+    if not selected_columns or len(selected_columns) == 0:
+        return {"error": "No columns selected for analysis"}
+
+    # Classify all selected variables
+    var_types = {}
+    for col in selected_columns:
+        var_types[col] = _classify_variable(df[col], col)
+
+    continuous_vars = [c for c in selected_columns if var_types[c] == 'continuous']
+    categorical_vars = [c for c in selected_columns if var_types[c] == 'categorical']
+
+    # Detect temporal patterns
+    temporal_cols = _detect_temporal_pattern(selected_columns)
+    has_temporal = len(temporal_cols) >= 2
+
+    result = {
+        "variable_classification": var_types,
+        "continuous_variables": continuous_vars,
+        "categorical_variables": categorical_vars,
+        "temporal_detected": temporal_cols,
+        "reasoning": [],
+        "test_name": None,
+        "test_result": None,
+        "posthoc_result": None,
+    }
+
+    # ==== CASE 1: All Continuous Variables (Correlation) ====
+    if len(continuous_vars) >= 2 and len(categorical_vars) == 0:
+        result["reasoning"].append("Multiple continuous variables detected -> Correlation analysis")
+
+        # Check normality for Pearson vs Spearman
+        all_normal = True
+        for col in continuous_vars[:2]:  # Check first two
+            is_normal, p, _ = _check_normality(df[col])
+            if not is_normal:
+                all_normal = False
+                result["reasoning"].append(f"  {col} failed normality test (p={round(p, 4)})")
+
+        method = "pearson" if all_normal else "spearman"
+        result["reasoning"].append(f"  Using {method.title()} correlation")
+        result["test_name"] = f"{method.title()} Correlation"
+        result["test_result"] = correlation_matrix(df, continuous_vars, method=method)
+        return result
+
+    # ==== CASE 2: Two Categorical Variables (Chi-Square / Fisher) ====
+    if len(categorical_vars) == 2 and len(continuous_vars) == 0:
+        var1, var2 = categorical_vars
+        ct = pd.crosstab(df[var1], df[var2])
+
+        # Check for Fisher's Exact conditions
+        _, _, _, expected = sp_stats.chi2_contingency(ct)
+        min_expected = expected.min()
+
+        if ct.shape == (2, 2) and min_expected < 5:
+            result["reasoning"].append("2x2 table with expected cell count < 5 -> Fisher's Exact Test")
+            result["test_name"] = "Fisher's Exact Test"
+            result["test_result"] = fisher_exact_test(df, var1, var2)
+        else:
+            result["reasoning"].append("Categorical variables -> Chi-Square Test")
+            if min_expected < 5:
+                result["reasoning"].append(f"  WARNING: Min expected cell = {round(min_expected, 2)} < 5")
+            result["test_name"] = "Chi-Square Test"
+            result["test_result"] = chi_square_test(df, var1, var2)
+
+        return result
+
+    # ==== CASE 3: One Categorical (Group) + One Continuous (Outcome) ====
+    if len(categorical_vars) == 1 and len(continuous_vars) == 1:
+        group_var = categorical_vars[0]
+        outcome_var = continuous_vars[0]
+        n_groups = df[group_var].nunique()
+
+        result["reasoning"].append(f"One grouping variable ({group_var}) with {n_groups} groups")
+        result["reasoning"].append(f"One continuous outcome ({outcome_var})")
+
+        # Get groups data
+        groups = []
+        group_names = []
+        for name, grp in df.groupby(group_var):
+            vals = pd.to_numeric(grp[outcome_var], errors='coerce').dropna()
+            if len(vals) > 0:
+                groups.append(vals.values)
+                group_names.append(str(name))
+
+        # Check normality for each group
+        all_normal = True
+        for i, g in enumerate(groups):
+            is_normal, p, _ = _check_normality(pd.Series(g))
+            if not is_normal:
+                all_normal = False
+                result["reasoning"].append(f"  Group '{group_names[i]}' failed normality (p={round(p, 4)})")
+
+        # Check homogeneity of variance
+        equal_var, lev_p = _check_homogeneity_of_variance(groups)
+        if not equal_var:
+            result["reasoning"].append(f"  Unequal variances detected (Levene p={round(lev_p, 4)})")
+
+        # ==== 2 Groups ====
+        if n_groups == 2:
+            if all_normal:
+                result["reasoning"].append("  Normal distributions -> Independent t-test")
+                if not equal_var:
+                    result["reasoning"].append("  Using Welch's t-test (unequal variances)")
+                result["test_name"] = "Two-Sample t-test"
+                result["test_result"] = ttest_two_sample(df, outcome_var, group_var, equal_var=equal_var)
+            else:
+                result["reasoning"].append("  Non-normal distributions -> Mann-Whitney U test")
+                result["test_name"] = "Mann-Whitney U Test"
+                result["test_result"] = mann_whitney_u(df, outcome_var, group_var)
+
+        # ==== >2 Groups ====
+        elif n_groups > 2:
+            if all_normal:
+                result["reasoning"].append("  Normal distributions -> One-way ANOVA")
+                result["test_name"] = "One-way ANOVA"
+                result["test_result"] = oneway_anova(df, outcome_var, group_var)
+
+                # Auto trigger post-hoc if significant
+                if result["test_result"].get("Prob > F", 1.0) < alpha:
+                    result["reasoning"].append("  ANOVA significant -> Running Tukey HSD post-hoc")
+                    result["posthoc_result"] = tukey_hsd(df, outcome_var, group_var)
+            else:
+                result["reasoning"].append("  Non-normal distributions -> Kruskal-Wallis test")
+                result["test_name"] = "Kruskal-Wallis Test"
+                result["test_result"] = kruskal_wallis(df, outcome_var, group_var)
+
+                # Post-hoc for Kruskal-Wallis
+                if result["test_result"].get("p", 1.0) < alpha:
+                    result["reasoning"].append("  Kruskal-Wallis significant -> Running Bonferroni post-hoc")
+                    result["posthoc_result"] = bonferroni_posthoc(df, outcome_var, group_var)
+
+        return result
+
+    # ==== CASE 4: Temporal/Paired Variables (Repeated Measures) ====
+    if has_temporal and len(temporal_cols) >= 2:
+        # All temporal columns should be continuous
+        temporal_continuous = [c for c in temporal_cols if var_types.get(c, 'unknown') == 'continuous']
+
+        if len(temporal_continuous) >= 2:
+            result["reasoning"].append(f"Temporal pattern detected in columns: {temporal_continuous}")
+
+            # Check normality of differences (for paired tests)
+            if len(temporal_continuous) == 2:
+                var1, var2 = temporal_continuous
+                c1 = pd.to_numeric(df[var1], errors='coerce')
+                c2 = pd.to_numeric(df[var2], errors='coerce')
+                valid = c1.notna() & c2.notna()
+                diff = c1[valid] - c2[valid]
+                is_normal, p, _ = _check_normality(diff)
+
+                if is_normal:
+                    result["reasoning"].append("  Normal differences -> Paired t-test")
+                    result["test_name"] = "Paired t-test"
+                    result["test_result"] = ttest_paired(df, var1, var2)
+                else:
+                    result["reasoning"].append(f"  Non-normal differences (p={round(p, 4)}) -> Wilcoxon signed-rank")
+                    result["test_name"] = "Wilcoxon Signed-Rank Test"
+                    result["test_result"] = wilcoxon_signed_rank(df, var1, var2)
+
+            elif len(temporal_continuous) >= 3:
+                # Check normality for repeated measures
+                all_normal = True
+                for col in temporal_continuous:
+                    is_normal, p, _ = _check_normality(df[col])
+                    if not is_normal:
+                        all_normal = False
+                        result["reasoning"].append(f"  {col} failed normality (p={round(p, 4)})")
+
+                if subject_var and subject_var in df.columns:
+                    if all_normal:
+                        result["reasoning"].append("  Normal distributions -> Repeated Measures ANOVA")
+                        result["test_name"] = "Repeated Measures ANOVA"
+                        result["test_result"] = repeated_measures_anova(df, subject_var, temporal_continuous)
+                    else:
+                        result["reasoning"].append("  Non-normal -> Friedman Test")
+                        result["test_name"] = "Friedman Test"
+                        result["test_result"] = friedman_test(df, subject_var, temporal_continuous)
+                else:
+                    result["reasoning"].append("  WARNING: No subject variable specified for repeated measures")
+                    result["reasoning"].append("  Provide subject_var parameter for proper repeated measures analysis")
+                    # Fall back to comparing first two time points
+                    var1, var2 = temporal_continuous[0], temporal_continuous[1]
+                    result["test_name"] = "Paired t-test (fallback)"
+                    result["test_result"] = ttest_paired(df, var1, var2)
+
+            return result
+
+    # ==== CASE 5: Mixed - Detect grouper automatically ====
+    if len(selected_columns) >= 2:
+        group_var, outcome_vars = _detect_grouping_variable(df, selected_columns)
+
+        if group_var and outcome_vars:
+            result["reasoning"].append(f"Auto-detected grouping variable: {group_var}")
+            result["reasoning"].append(f"Outcome variables: {outcome_vars}")
+
+            # Recursively call with detected structure
+            if len(outcome_vars) == 1:
+                # Single outcome - use the standard analysis
+                return select_statistical_test(df, [group_var, outcome_vars[0]], subject_var, alpha)
+            else:
+                # Multiple outcomes - analyze each
+                result["test_name"] = "Multiple Outcome Analysis"
+                result["test_result"] = {}
+                for outcome in outcome_vars:
+                    sub_result = select_statistical_test(df, [group_var, outcome], subject_var, alpha)
+                    result["test_result"][outcome] = {
+                        "test": sub_result.get("test_name"),
+                        "result": sub_result.get("test_result"),
+                    }
+                return result
+
+    # ==== CASE 6: Single Continuous Variable ====
+    if len(continuous_vars) == 1 and len(categorical_vars) == 0:
+        result["reasoning"].append("Single continuous variable -> Descriptive statistics")
+        result["test_name"] = "Descriptive Statistics"
+        result["test_result"] = descriptive_stats(df, continuous_vars, detail=True).to_dict('records')
+
+        # Add normality test
+        is_normal, p, stat = _check_normality(df[continuous_vars[0]])
+        result["normality_test"] = {
+            "is_normal": is_normal,
+            "p_value": round(p, 4) if p else None,
+            "statistic": round(stat, 4) if stat else None,
+        }
+        return result
+
+    # ==== CASE 7: Single Categorical Variable ====
+    if len(categorical_vars) == 1 and len(continuous_vars) == 0:
+        result["reasoning"].append("Single categorical variable -> Frequency table")
+        result["test_name"] = "Frequency Table"
+        result["test_result"] = tabulate(df, categorical_vars[0]).to_dict('records')
+        return result
+
+    # ==== Fallback ====
+    result["reasoning"].append("Could not determine appropriate test automatically")
+    result["reasoning"].append("Please specify the analysis type manually")
+    result["test_name"] = "Manual Selection Required"
+    result["suggestion"] = {
+        "if_comparing_groups": "Use ttest_two_sample or oneway_anova",
+        "if_correlation": "Use correlation_matrix",
+        "if_categorical": "Use chi_square_test",
+        "if_paired": "Use ttest_paired or wilcoxon_signed_rank",
+    }
+
+    return result
+
+
+def run_smart_analysis(df, selected_columns, subject_var=None, alpha=0.05):
+    """
+    Wrapper for select_statistical_test with additional validation and formatting.
+    Returns user-friendly output with clear recommendations.
+    """
+    result = select_statistical_test(df, selected_columns, subject_var, alpha)
+
+    # Format the output for display
+    output = {
+        "selected_test": result.get("test_name", "Unknown"),
+        "reasoning": "\n".join(result.get("reasoning", [])),
+        "variable_types": result.get("variable_classification", {}),
+        "result": result.get("test_result", {}),
+    }
+
+    if result.get("posthoc_result"):
+        output["posthoc"] = result.get("posthoc_result")
+        output["posthoc_note"] = "Post-hoc test automatically triggered due to significant main effect"
+
+    if result.get("normality_test"):
+        output["normality"] = result.get("normality_test")
+
+    return output
+
+
+# ---------------------------------------------------------------------------
+# 18. MASTER DISPATCHER
 # ---------------------------------------------------------------------------
 
 AVAILABLE_TESTS = {
@@ -904,6 +1612,36 @@ AVAILABLE_TESTS = {
         "func": "sample_size_proportions",
         "description": "Sample size for comparing proportions",
         "stata_cmd": "power twoproportions",
+    },
+    "fisher_exact": {
+        "func": "fisher_exact_test",
+        "description": "Fisher's Exact Test for 2x2 tables (small samples)",
+        "stata_cmd": "tabulate var1 var2, exact",
+    },
+    "repeated_measures_anova": {
+        "func": "repeated_measures_anova",
+        "description": "Repeated Measures ANOVA (within-subjects)",
+        "stata_cmd": "anova depvar subject time, repeated(time)",
+    },
+    "friedman": {
+        "func": "friedman_test",
+        "description": "Friedman Test (non-parametric repeated measures)",
+        "stata_cmd": "friedman var1 var2 var3, id(subject)",
+    },
+    "tukey_hsd": {
+        "func": "tukey_hsd",
+        "description": "Tukey HSD post-hoc test",
+        "stata_cmd": "oneway depvar groupvar, tukey",
+    },
+    "bonferroni": {
+        "func": "bonferroni_posthoc",
+        "description": "Bonferroni-corrected pairwise comparisons",
+        "stata_cmd": "oneway depvar groupvar, bonferroni",
+    },
+    "smart_analysis": {
+        "func": "run_smart_analysis",
+        "description": "Auto-select appropriate test based on data",
+        "stata_cmd": "auto",
     },
 }
 

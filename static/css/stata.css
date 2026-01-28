@@ -996,3 +996,211 @@ textarea.form-control {
         display: none;
     }
 }
+
+/* ============================================================
+   RETRO ASCII AESTHETIC
+   ============================================================ */
+
+/* ASCII Icon Styling */
+.ascii-icon {
+    font-family: var(--font-mono);
+    font-weight: 700;
+    font-size: 20px;
+    color: var(--accent-cyan);
+    text-shadow: 0 0 5px var(--accent-cyan), 0 0 10px rgba(0, 229, 255, 0.3);
+    letter-spacing: 2px;
+}
+
+/* Quick Action Cards - Retro Style */
+.quick-action {
+    border: 2px solid var(--border-color);
+    background: linear-gradient(135deg, var(--bg-secondary) 0%, var(--bg-panel) 100%);
+    transition: all 0.2s ease;
+}
+.quick-action:hover {
+    border-color: var(--accent-cyan);
+    box-shadow: 0 0 15px rgba(0, 229, 255, 0.2), inset 0 0 20px rgba(0, 229, 255, 0.05);
+}
+.quick-action:hover .ascii-icon {
+    text-shadow: 0 0 10px var(--accent-cyan), 0 0 20px rgba(0, 229, 255, 0.5);
+}
+
+/* Modal Close Button - Retro */
+.modal-close {
+    font-family: var(--font-mono);
+    font-size: 16px;
+    color: var(--text-muted);
+}
+.modal-close:hover {
+    color: var(--accent-red);
+    text-shadow: 0 0 5px var(--accent-red);
+}
+
+/* Button Retro Style */
+.btn {
+    font-family: var(--font-mono);
+    letter-spacing: 1px;
+    text-transform: uppercase;
+}
+.btn:hover {
+    text-shadow: 0 0 5px currentColor;
+}
+
+/* Output Area - Terminal Style */
+#output-area {
+    background: #0a0a0f;
+    background-image:
+        linear-gradient(rgba(0, 255, 0, 0.02) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(0, 255, 0, 0.02) 1px, transparent 1px);
+    background-size: 20px 20px;
+}
+
+.output-command::before {
+    content: ">>> ";
+    color: var(--accent-cyan);
+}
+
+.output-result {
+    font-family: var(--font-mono);
+    font-size: 14px;
+    line-height: 1.5;
+}
+
+/* Status Bar - Retro */
+#status-bar {
+    font-family: var(--font-mono);
+    letter-spacing: 1px;
+}
+
+/* AI Chat - Retro Messages */
+.ai-message.system::before {
+    content: "[SYS] ";
+    color: var(--accent-yellow);
+}
+.ai-message.user::before {
+    content: "[YOU] ";
+    color: var(--accent-cyan);
+}
+.ai-message.assistant::before {
+    content: "[AI] ";
+    color: var(--accent-green);
+}
+
+/* Command Input - Terminal Style */
+#command-bar label {
+    font-family: var(--font-mono);
+    color: var(--accent-green);
+}
+#command-bar label::after {
+    content: " >>>";
+    color: var(--accent-cyan);
+}
+
+/* Tab Bar - Pixelated */
+.tab {
+    font-family: var(--font-mono);
+    letter-spacing: 1px;
+    text-transform: uppercase;
+}
+.tab.active {
+    border-bottom: 2px solid var(--accent-cyan);
+    text-shadow: 0 0 5px var(--accent-cyan);
+}
+
+/* Menu Items */
+.menu-item {
+    font-family: var(--font-mono);
+}
+.menu-dropdown-item {
+    font-family: var(--font-mono);
+}
+.menu-dropdown-item:hover {
+    text-shadow: 0 0 5px var(--accent-cyan);
+}
+
+/* Welcome Screen - Retro */
+#welcome-screen h1 {
+    text-shadow:
+        0 0 10px var(--accent-blue),
+        0 0 20px rgba(74, 158, 255, 0.5),
+        0 0 40px rgba(74, 158, 255, 0.3);
+}
+#welcome-screen .version {
+    font-family: var(--font-mono);
+    letter-spacing: 2px;
+}
+
+/* Toolbar Buttons - Pixel Style */
+.toolbar-btn {
+    font-family: var(--font-mono);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}
+.toolbar-btn:hover {
+    text-shadow: 0 0 5px var(--accent-cyan);
+}
+
+/* Variables Panel - Terminal List */
+.var-item {
+    font-family: var(--font-mono);
+}
+.var-item:hover {
+    border-left: 2px solid var(--accent-cyan);
+}
+.var-item.selected {
+    border-left: 2px solid var(--accent-green);
+}
+
+/* Panel Headers */
+.panel-header {
+    font-family: var(--font-mono);
+    letter-spacing: 1px;
+    text-transform: uppercase;
+}
+
+/* Form Controls - Retro Input */
+.form-control {
+    font-family: var(--font-mono);
+    border: 1px solid var(--border-color);
+}
+.form-control:focus {
+    border-color: var(--accent-cyan);
+    box-shadow: 0 0 5px rgba(0, 229, 255, 0.3);
+}
+
+/* Data Table - Grid Style */
+.data-table th {
+    font-family: var(--font-mono);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}
+.data-table td {
+    font-family: var(--font-mono);
+}
+
+/* Right Panel Tabs */
+.right-tab {
+    font-family: var(--font-mono);
+    letter-spacing: 1px;
+}
+.right-tab.active {
+    text-shadow: 0 0 5px var(--accent-cyan);
+}
+
+/* Properties - Terminal Style */
+.prop-label {
+    font-family: var(--font-mono);
+}
+.prop-value {
+    font-family: var(--font-mono);
+}
+
+/* Cursor Blink Animation */
+@keyframes blink {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0; }
+}
+#command-input::after {
+    content: "_";
+    animation: blink 1s infinite;
+}
