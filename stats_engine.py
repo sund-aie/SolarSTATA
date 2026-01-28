@@ -722,12 +722,20 @@ def detect_variable_types(df):
     # Use positional indexing to avoid issues with duplicate column names
     for i, col in enumerate(df.columns):
         col_series = df.iloc[:, i]
+
+        # Guard: if iloc returns a DataFrame (duplicate column names), take first column
+        if isinstance(col_series, pd.DataFrame):
+            col_series = col_series.iloc[:, 0]
+
         n_total = len(col_series)
         n_missing = int(col_series.isna().sum())
         n_valid = n_total - n_missing
         n_unique = int(col_series.nunique())
 
-        numeric = pd.to_numeric(col_series, errors="coerce")
+        try:
+            numeric = pd.to_numeric(col_series, errors="coerce")
+        except (TypeError, AttributeError):
+            numeric = pd.Series([np.nan] * n_total)
         n_numeric = int(numeric.notna().sum())
 
         if n_numeric / max(n_valid, 1) > 0.8 and n_unique > 10:
@@ -755,9 +763,15 @@ def clean_data(df):
     """Auto-clean dataset: strip whitespace, detect types, handle obvious issues."""
     cleaned = df.copy()
     for i in range(len(cleaned.columns)):
-        if cleaned.iloc[:, i].dtype == object:
-            cleaned.iloc[:, i] = cleaned.iloc[:, i].str.strip()
-    cleaned.columns = [c.strip().replace(" ", "_") for c in cleaned.columns]
+        col = cleaned.iloc[:, i]
+        if isinstance(col, pd.DataFrame):
+            col = col.iloc[:, 0]
+        try:
+            if col.dtype == object:
+                cleaned.iloc[:, i] = col.str.strip()
+        except AttributeError:
+            pass
+    cleaned.columns = [str(c).strip().replace(" ", "_") for c in cleaned.columns]
     return cleaned
 
 

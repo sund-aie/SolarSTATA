@@ -439,8 +439,17 @@ def smart_clean(df_raw):
     for i, col_name in enumerate(df.columns):
         col_series = df.iloc[:, i].copy()
 
+        # Ensure col_series is truly a Series (guard against edge cases)
+        if isinstance(col_series, pd.DataFrame):
+            col_series = col_series.iloc[:, 0]
+
         # Clean strings
-        if col_series.dtype == object:
+        try:
+            is_object = col_series.dtype == object
+        except AttributeError:
+            is_object = False
+
+        if is_object:
             col_series = col_series.astype(str).str.strip()
             col_series = col_series.replace({"nan": np.nan, "": np.nan, "None": np.nan,
                                               "NaN": np.nan, "none": np.nan, "NaT": np.nan})
@@ -450,7 +459,7 @@ def smart_clean(df_raw):
             numeric_col = pd.to_numeric(col_series, errors="coerce")
             if numeric_col.notna().sum() / max(len(df), 1) > 0.5:
                 col_series = numeric_col
-        except Exception:
+        except (TypeError, AttributeError, ValueError):
             pass
 
         new_data[col_name] = col_series.values
