@@ -53,13 +53,20 @@ def numpy_safe(obj):
     if isinstance(obj, (np.integer,)):
         return int(obj)
     if isinstance(obj, (np.floating,)):
-        return float(obj)
+        v = float(obj)
+        if np.isnan(v) or np.isinf(v):
+            return None
+        return v
+    if isinstance(obj, float):
+        if np.isnan(obj) or np.isinf(obj):
+            return None
+        return obj
     if isinstance(obj, np.ndarray):
         return obj.tolist()
     if isinstance(obj, pd.DataFrame):
-        return obj.to_dict("records")
+        return json.loads(obj.to_json(orient="records"))
     if isinstance(obj, pd.Series):
-        return obj.to_dict()
+        return json.loads(obj.to_json())
     if isinstance(obj, (np.bool_,)):
         return bool(obj)
     return obj
@@ -156,7 +163,7 @@ def upload_file():
             "shape": list(df.shape),
             "columns": df.columns.tolist(),
             "dtypes": {str(col): str(dtype) for col, dtype in df.dtypes.items()},
-            "preview": df.head(20).to_dict("records"),
+            "preview": json.loads(df.head(20).to_json(orient="records")),
             "data_info": json.loads(json.dumps(data_info, default=numpy_safe)),
             "message": f"Successfully loaded {filename}: {df.shape[0]} observations, {df.shape[1]} variables",
         })
