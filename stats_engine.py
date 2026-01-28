@@ -719,14 +719,24 @@ def cox_regression(df, time_var, event_var, covariates):
 def detect_variable_types(df):
     """Analyze and classify variables (like Stata's codebook)."""
     info = []
-    for col in df.columns:
-        n_total = len(df[col])
-        n_missing = df[col].isna().sum()
-        n_valid = n_total - n_missing
-        n_unique = df[col].nunique()
+    # Use positional indexing to avoid issues with duplicate column names
+    for i, col in enumerate(df.columns):
+        col_series = df.iloc[:, i]
 
-        numeric = pd.to_numeric(df[col], errors="coerce")
-        n_numeric = numeric.notna().sum()
+        # Guard: if iloc returns a DataFrame (duplicate column names), take first column
+        if isinstance(col_series, pd.DataFrame):
+            col_series = col_series.iloc[:, 0]
+
+        n_total = len(col_series)
+        n_missing = int(col_series.isna().sum())
+        n_valid = n_total - n_missing
+        n_unique = int(col_series.nunique())
+
+        try:
+            numeric = pd.to_numeric(col_series, errors="coerce")
+        except (TypeError, AttributeError):
+            numeric = pd.Series([np.nan] * n_total)
+        n_numeric = int(numeric.notna().sum())
 
         if n_numeric / max(n_valid, 1) > 0.8 and n_unique > 10:
             vtype = "continuous"
@@ -735,11 +745,16 @@ def detect_variable_types(df):
         else:
             vtype = "continuous"
 
+        example = "N/A"
+        if n_valid > 0:
+            first_valid = col_series.dropna().iloc[0]
+            example = str(first_valid)
+
         info.append({
             "Variable": col, "Type": vtype,
             "N": n_valid, "Missing": n_missing,
             "Unique": n_unique,
-            "Example": str(df[col].dropna().iloc[0]) if n_valid > 0 else "N/A",
+            "Example": example,
         })
     return pd.DataFrame(info)
 
@@ -747,10 +762,16 @@ def detect_variable_types(df):
 def clean_data(df):
     """Auto-clean dataset: strip whitespace, detect types, handle obvious issues."""
     cleaned = df.copy()
-    for col in cleaned.columns:
-        if cleaned[col].dtype == object:
-            cleaned[col] = cleaned[col].str.strip()
-    cleaned.columns = [c.strip().replace(" ", "_") for c in cleaned.columns]
+    for i in range(len(cleaned.columns)):
+        col = cleaned.iloc[:, i]
+        if isinstance(col, pd.DataFrame):
+            col = col.iloc[:, 0]
+        try:
+            if col.dtype == object:
+                cleaned.iloc[:, i] = col.str.strip()
+        except AttributeError:
+            pass
+    cleaned.columns = [str(c).strip().replace(" ", "_") for c in cleaned.columns]
     return cleaned
 
 

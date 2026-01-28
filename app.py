@@ -109,19 +109,44 @@ def upload_file():
         elif ext == "tsv" or ext == "txt":
             df = pd.read_csv(filepath, sep="\t")
         elif ext in ("xlsx", "xls"):
-            df = pd.read_excel(filepath)
+            df = pd.read_excel(filepath, header=None)
+            # Flatten: read without header so merged cells don't create MultiIndex
         elif ext == "dta":
             df = pd.read_stata(filepath)
         else:
             return jsonify({"error": "Unsupported format"}), 400
 
         # Smart clean
-        df = ai_brain.smart_clean(df)
+        try:
+            df = ai_brain.smart_clean(df)
+        except Exception:
+            # Fallback: basic cleaning if smart_clean fails
+            if isinstance(df.columns, pd.MultiIndex):
+                df.columns = [str(c) for c in df.columns]
+            df.columns = [str(c) for c in df.columns]
+
+        # Ensure all column names are strings and unique
+        cols = list(df.columns)
+        seen = {}
+        new_cols = []
+        for c in cols:
+            c = str(c)
+            if c in seen:
+                seen[c] += 1
+                new_cols.append(f"{c}_{seen[c]}")
+            else:
+                seen[c] = 0
+                new_cols.append(c)
+        df.columns = new_cols
+
         set_current_df(df, "current")
         set_current_df(df, filename)
 
         # Analyze structure
-        data_info = ai_brain.analyze_data_structure(df)
+        try:
+            data_info = ai_brain.analyze_data_structure(df)
+        except Exception:
+            data_info = {"n_observations": df.shape[0], "n_variables": df.shape[1]}
 
         log_command(f'use "{filename}"', f"({df.shape[0]} observations, {df.shape[1]} variables)")
 
@@ -130,7 +155,7 @@ def upload_file():
             "filename": filename,
             "shape": list(df.shape),
             "columns": df.columns.tolist(),
-            "dtypes": {col: str(dtype) for col, dtype in df.dtypes.items()},
+            "dtypes": {str(col): str(dtype) for col, dtype in df.dtypes.items()},
             "preview": df.head(20).to_dict("records"),
             "data_info": json.loads(json.dumps(data_info, default=numpy_safe)),
             "message": f"Successfully loaded {filename}: {df.shape[0]} observations, {df.shape[1]} variables",
@@ -723,4 +748,4 @@ def health():
 
 
 if __name__ == "__main__":
-    app.run(debug=True, host="0.0.0.0", port=5000)
+    app.run(debug=True, host="0.0.0.0", port=5001)
