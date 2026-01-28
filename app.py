@@ -421,6 +421,85 @@ def run_sample_size():
     return jsonify({"result": json.loads(json.dumps(result, default=numpy_safe))})
 
 
+@app.route("/api/stats/smart_analyze", methods=["POST"])
+def run_smart_analyze():
+    """Smart Statistical Router - auto-selects appropriate test."""
+    df = get_current_df()
+    if df is None:
+        return jsonify({"error": "No dataset loaded"}), 400
+    data = request.json or {}
+    selected_columns = data.get("columns", [])
+    subject_var = data.get("subject_var")
+    alpha = data.get("alpha", 0.05)
+
+    if not selected_columns:
+        return jsonify({"error": "No columns selected for analysis"}), 400
+
+    result = se.run_smart_analysis(df, selected_columns, subject_var, alpha)
+    log_command(f"smart analyze {' '.join(selected_columns)}")
+    return jsonify({"result": json.loads(json.dumps(result, default=numpy_safe))})
+
+
+@app.route("/api/stats/fisher_exact", methods=["POST"])
+def run_fisher_exact():
+    """Fisher's Exact Test for 2x2 tables."""
+    df = get_current_df()
+    if df is None:
+        return jsonify({"error": "No dataset loaded"}), 400
+    data = request.json
+    result = se.fisher_exact_test(df, data["var1"], data["var2"])
+    log_command(f"tabulate {data['var1']} {data['var2']}, exact")
+    return jsonify({"result": json.loads(json.dumps(result, default=numpy_safe))})
+
+
+@app.route("/api/stats/repeated_measures", methods=["POST"])
+def run_repeated_measures():
+    """Repeated Measures ANOVA or Friedman Test."""
+    df = get_current_df()
+    if df is None:
+        return jsonify({"error": "No dataset loaded"}), 400
+    data = request.json
+    test_type = data.get("type", "anova")
+    subject_var = data.get("subject_var")
+    within_vars = data.get("within_vars", [])
+
+    if not subject_var or not within_vars:
+        return jsonify({"error": "Requires subject_var and within_vars"}), 400
+
+    if test_type == "friedman":
+        result = se.friedman_test(df, subject_var, within_vars)
+        log_command(f"friedman {' '.join(within_vars)}, id({subject_var})")
+    else:
+        result = se.repeated_measures_anova(df, subject_var, within_vars)
+        log_command(f"anova repeated {' '.join(within_vars)}, repeated({subject_var})")
+
+    return jsonify({"result": json.loads(json.dumps(result, default=numpy_safe))})
+
+
+@app.route("/api/stats/posthoc", methods=["POST"])
+def run_posthoc():
+    """Post-hoc tests (Tukey HSD or Bonferroni)."""
+    df = get_current_df()
+    if df is None:
+        return jsonify({"error": "No dataset loaded"}), 400
+    data = request.json
+    test_type = data.get("type", "tukey")
+    depvar = data.get("depvar")
+    groupvar = data.get("groupvar")
+
+    if not depvar or not groupvar:
+        return jsonify({"error": "Requires depvar and groupvar"}), 400
+
+    if test_type == "bonferroni":
+        result = se.bonferroni_posthoc(df, depvar, groupvar)
+        log_command(f"oneway {depvar} {groupvar}, bonferroni")
+    else:
+        result = se.tukey_hsd(df, depvar, groupvar)
+        log_command(f"oneway {depvar} {groupvar}, tukey")
+
+    return jsonify({"result": json.loads(json.dumps(result, default=numpy_safe))})
+
+
 # ---------------------------------------------------------------------------
 # AI ANALYSIS API
 # ---------------------------------------------------------------------------
@@ -476,6 +555,67 @@ def ai_research():
 
     results = ai_brain.search_literature(query)
     return jsonify({"results": results, "query": query})
+
+
+@app.route("/api/ai/proposal", methods=["POST"])
+def upload_proposal():
+    """Upload and parse research proposal for RAG context."""
+    data = request.json or {}
+    proposal_text = data.get("text", "")
+
+    if not proposal_text:
+        return jsonify({"error": "No proposal text provided"}), 400
+
+    result = ai_brain.set_proposal_context(proposal_text)
+    log_command("ai proposal upload")
+    return jsonify({"result": result})
+
+
+@app.route("/api/ai/proposal", methods=["GET"])
+def get_proposal():
+    """Get stored proposal context."""
+    context = ai_brain.get_proposal_context()
+    return jsonify({"context": context})
+
+
+@app.route("/api/ai/map_variables", methods=["POST"])
+def map_variables():
+    """Map proposal variables to data columns."""
+    df = get_current_df()
+    if df is None:
+        return jsonify({"error": "No dataset loaded"}), 400
+
+    data = request.json or {}
+    proposal_text = data.get("proposal", "")
+
+    result = ai_brain.map_variables_to_data(df, proposal_text)
+    return jsonify({"result": result})
+
+
+@app.route("/api/ai/check_references", methods=["POST"])
+def check_references():
+    """Analyze citations in proposal."""
+    data = request.json or {}
+    proposal_text = data.get("text", "")
+
+    result = ai_brain.check_references(proposal_text)
+    return jsonify({"result": result})
+
+
+@app.route("/api/ai/sample_size_from_text", methods=["POST"])
+def sample_size_from_text():
+    """Calculate sample size from text with Mean/SD values."""
+    data = request.json or {}
+    text = data.get("text", "")
+    alpha = data.get("alpha", 0.05)
+    power = data.get("power", 0.80)
+
+    if not text:
+        return jsonify({"error": "No text provided"}), 400
+
+    result = ai_brain.calculate_sample_size_from_text(text, alpha, power)
+    log_command("sample size from text")
+    return jsonify({"result": json.loads(json.dumps(result, default=numpy_safe))})
 
 
 # ---------------------------------------------------------------------------

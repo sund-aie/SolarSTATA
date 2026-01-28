@@ -820,3 +820,308 @@ document.addEventListener("click", (e) => {
         e.target.classList.remove("active");
     }
 });
+
+// ============================================================
+// SMART STATISTICAL ROUTER
+// ============================================================
+async function runSmartAnalyze() {
+    const vars = getMultiSelectValues("smart-vars");
+    const subjectVar = document.getElementById("smart-subject")?.value || null;
+    const alpha = parseFloat(document.getElementById("smart-alpha")?.value) || 0.05;
+
+    if (vars.length === 0) {
+        showToast("Select at least one variable", "error");
+        return;
+    }
+
+    closeModal("modal-smart-analyze");
+    switchTab("output");
+    appendOutput("command", `smart analyze ${vars.join(" ")}`, ">>> Analyzing data structure and selecting test...");
+
+    try {
+        const resp = await fetch("/api/stats/smart_analyze", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                columns: vars,
+                subject_var: subjectVar,
+                alpha: alpha
+            }),
+        });
+        const data = await resp.json();
+
+        if (data.error) {
+            updateLastOutput(`smart analyze`, data.error, "error");
+            return;
+        }
+
+        const result = data.result;
+        let output = "=" .repeat(60) + "\n";
+        output += "  SMART STATISTICAL ROUTER RESULTS\n";
+        output += "=" .repeat(60) + "\n\n";
+
+        // Selected test
+        output += `>>> Selected Test: ${result.selected_test || "Unknown"}\n\n`;
+
+        // Reasoning
+        if (result.reasoning) {
+            output += "--- Decision Reasoning ---\n";
+            output += result.reasoning + "\n\n";
+        }
+
+        // Variable types
+        if (result.variable_types) {
+            output += "--- Variable Classification ---\n";
+            Object.entries(result.variable_types).forEach(([v, t]) => {
+                output += `  ${v}: ${t}\n`;
+            });
+            output += "\n";
+        }
+
+        // Test result
+        if (result.result) {
+            output += "--- Test Results ---\n";
+            if (typeof result.result === "string") {
+                output += result.result;
+            } else if (result.result.output) {
+                output += result.result.output;
+            } else {
+                output += JSON.stringify(result.result, null, 2);
+            }
+            output += "\n\n";
+        }
+
+        // Post-hoc (if any)
+        if (result.posthoc) {
+            output += "--- Post-Hoc Analysis (auto-triggered) ---\n";
+            output += result.posthoc_note + "\n";
+            if (result.posthoc.comparisons) {
+                result.posthoc.comparisons.forEach(c => {
+                    output += `  ${c.Group1} vs ${c.Group2}: `;
+                    output += `diff=${c.Mean_Diff}, p=${c.p_adj || c.p_bonferroni}`;
+                    output += c.Significant === true || c.Reject_H0 === "True" ? " *\n" : "\n";
+                });
+            }
+            output += "\n";
+        }
+
+        // Normality (if any)
+        if (result.normality) {
+            output += "--- Normality Test ---\n";
+            output += `  Normal: ${result.normality.is_normal ? "Yes" : "No"}\n`;
+            output += `  Shapiro-Wilk p: ${result.normality.p_value}\n\n`;
+        }
+
+        output += "=" .repeat(60) + "\n";
+        output += "  END OF SMART ANALYSIS\n";
+        output += "=" .repeat(60);
+
+        updateLastOutput(`smart analyze ${vars.join(" ")}`, output);
+        showToast(`Analysis complete: ${result.selected_test}`, "success");
+
+    } catch (err) {
+        updateLastOutput(`smart analyze`, `Error: ${err.message}`, "error");
+    }
+}
+
+// ============================================================
+// SAMPLE SIZE FROM TEXT
+// ============================================================
+async function runSampleSizeFromText() {
+    const text = document.getElementById("ss-text")?.value || "";
+    const alpha = parseFloat(document.getElementById("ss-text-alpha")?.value) || 0.05;
+    const power = parseFloat(document.getElementById("ss-text-power")?.value) || 0.80;
+
+    if (!text.trim()) {
+        showToast("Paste text with Mean/SD values", "error");
+        return;
+    }
+
+    closeModal("modal-samplesize-text");
+    switchTab("output");
+    appendOutput("command", "sample size from text", ">>> Parsing Mean/SD values from text...");
+
+    try {
+        const resp = await fetch("/api/ai/sample_size_from_text", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ text, alpha, power }),
+        });
+        const data = await resp.json();
+
+        if (data.error || data.result?.error) {
+            updateLastOutput("sample size from text", data.error || data.result.error, "error");
+            return;
+        }
+
+        const result = data.result;
+        let output = "=" .repeat(60) + "\n";
+        output += "  SAMPLE SIZE CALCULATION (from text)\n";
+        output += "=" .repeat(60) + "\n\n";
+
+        // Extracted values
+        if (result.group1 && result.group2) {
+            output += "--- Extracted Values ---\n";
+            output += `  Group 1 (${result.group1.name}):\n`;
+            output += `    Mean = ${result.group1.mean}, SD = ${result.group1.sd}\n`;
+            output += `    Source: "${result.group1.source}"\n\n`;
+            output += `  Group 2 (${result.group2.name}):\n`;
+            output += `    Mean = ${result.group2.mean}, SD = ${result.group2.sd}\n`;
+            output += `    Source: "${result.group2.source}"\n\n`;
+        }
+
+        // Effect size
+        if (result.effect_size) {
+            output += "--- Effect Size ---\n";
+            output += `  Cohen's d = ${result.effect_size.cohens_d}\n`;
+            output += `  Interpretation: ${result.effect_size.interpretation}\n\n`;
+        }
+
+        // Calculation
+        if (result.calculation) {
+            const calc = result.calculation;
+            output += "--- Sample Size Calculation ---\n";
+            output += `  Mean difference (delta) = ${calc.mean_difference}\n`;
+            output += `  Pooled SD = ${calc.pooled_sd}\n`;
+            output += `  Alpha = ${calc.alpha}, Power = ${calc.power}\n`;
+            output += `  Z_alpha/2 = ${calc.z_alpha}, Z_beta = ${calc.z_beta}\n\n`;
+            output += `  >>> Required N per group = ${calc.n_per_group}\n`;
+            output += `  >>> Total N = ${calc.total_n}\n\n`;
+            output += `  Formula: ${calc.formula}\n`;
+        }
+
+        // All extracted values
+        if (result.all_extracted && result.all_extracted.length > 2) {
+            output += "\n--- All Extracted Values ---\n";
+            result.all_extracted.forEach((v, i) => {
+                output += `  [${i+1}] ${v.group}: Mean=${v.mean}, SD=${v.sd}\n`;
+            });
+        }
+
+        output += "\n" + "=" .repeat(60);
+
+        updateLastOutput("sample size from text", output);
+        showToast("Sample size calculated", "success");
+
+    } catch (err) {
+        updateLastOutput("sample size from text", `Error: ${err.message}`, "error");
+    }
+}
+
+// ============================================================
+// PROPOSAL UPLOAD (RAG CONTEXT)
+// ============================================================
+async function uploadProposal() {
+    const text = document.getElementById("proposal-text")?.value || "";
+
+    if (!text.trim()) {
+        showToast("Paste your research proposal text", "error");
+        return;
+    }
+
+    closeModal("modal-proposal-upload");
+    showToast("Storing proposal context...");
+
+    try {
+        const resp = await fetch("/api/ai/proposal", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ text }),
+        });
+        const data = await resp.json();
+
+        if (data.error) {
+            showToast(data.error, "error");
+            return;
+        }
+
+        const result = data.result;
+        let msg = `Proposal stored (${result.text_length} chars)`;
+        if (result.variables_detected?.length > 0) {
+            msg += `, ${result.variables_detected.length} variables detected`;
+        }
+        if (result.citations_found > 0) {
+            msg += `, ${result.citations_found} citations found`;
+        }
+
+        showToast(msg, "success");
+
+        // Also show in output
+        switchTab("output");
+        let output = ">>> Research Proposal Context Stored\n";
+        output += `  Text length: ${result.text_length} characters\n`;
+        output += `  Variables detected: ${result.variables_detected?.join(", ") || "None"}\n`;
+        output += `  Citations found: ${result.citations_found}\n`;
+        output += `  Methodology extracted: ${result.methodology_extracted ? "Yes" : "No"}\n`;
+        output += "\n>>> The AI will use this context for future analyses.";
+        appendOutput("command", "ai proposal upload", output);
+
+    } catch (err) {
+        showToast(`Error: ${err.message}`, "error");
+    }
+}
+
+async function checkProposalReferences() {
+    const text = document.getElementById("proposal-text")?.value || "";
+
+    if (!text.trim()) {
+        showToast("Paste your proposal text first", "error");
+        return;
+    }
+
+    showToast("Analyzing references...");
+
+    try {
+        const resp = await fetch("/api/ai/check_references", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ text }),
+        });
+        const data = await resp.json();
+
+        if (data.error) {
+            showToast(data.error, "error");
+            return;
+        }
+
+        const result = data.result;
+        closeModal("modal-proposal-upload");
+        switchTab("output");
+
+        let output = "=" .repeat(60) + "\n";
+        output += "  REFERENCE ANALYSIS\n";
+        output += "=" .repeat(60) + "\n\n";
+        output += `Total citations found: ${result.total_citations}\n\n`;
+
+        if (result.citations_list?.length > 0) {
+            output += "--- Citations Found ---\n";
+            result.citations_list.forEach((c, i) => {
+                output += `  [${i+1}] ${c}\n`;
+            });
+            output += "\n";
+        }
+
+        if (result.quality_indicators) {
+            const qi = result.quality_indicators;
+            output += "--- Quality Indicators ---\n";
+            output += `  Average publication year: ${qi.average_year}\n`;
+            output += `  Oldest reference: ${qi.oldest_reference}\n`;
+            output += `  Newest reference: ${qi.newest_reference}\n`;
+            output += `  Years span: ${qi.years_span}\n\n`;
+        }
+
+        if (result.suggestions?.length > 0) {
+            output += "--- Suggestions ---\n";
+            result.suggestions.forEach(s => {
+                output += `  >>> ${s}\n`;
+            });
+        }
+
+        output += "\n" + "=" .repeat(60);
+        appendOutput("command", "check references", output);
+        showToast("Reference analysis complete", "success");
+
+    } catch (err) {
+        showToast(`Error: ${err.message}`, "error");
+    }
+}

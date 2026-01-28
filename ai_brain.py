@@ -16,6 +16,349 @@ import re
 import requests
 from bs4 import BeautifulSoup
 import stats_engine as se
+from scipy.stats import norm
+
+# Global storage for proposal context (RAG)
+_proposal_context = {
+    "text": "",
+    "variables": {},
+    "methodology": "",
+    "citations": [],
+}
+
+
+# ---------------------------------------------------------------------------
+# TEXT PARSING MODULE - Extract Mean/SD from text
+# ---------------------------------------------------------------------------
+
+def extract_mean_sd_from_text(text):
+    """
+    Parse text to extract Mean and Standard Deviation values.
+    Handles various formats:
+    - "Mean = 5.2, SD = 1.3"
+    - "M=5.2 (SD=1.3)"
+    - "5.2 +/- 1.3"
+    - "mean: 5.2, std: 1.3"
+    - Tables with Mean/SD columns
+    Returns list of dicts with group, mean, sd
+    """
+    results = []
+
+    # Pattern 1: Mean = X, SD = Y or Mean: X, SD: Y
+    pattern1 = r'[Mm]ean\s*[=:]\s*([\d.]+)\s*[,;]?\s*(?:SD|sd|S\.D\.|Std\.?\s*Dev\.?)\s*[=:]\s*([\d.]+)'
+    for match in re.finditer(pattern1, text):
+        results.append({
+            "group": "extracted",
+            "mean": float(match.group(1)),
+            "sd": float(match.group(2)),
+            "source": match.group(0)
+        })
+
+    # Pattern 2: M=X (SD=Y) or M = X (SD = Y)
+    pattern2 = r'M\s*=\s*([\d.]+)\s*\((?:SD|sd)\s*=\s*([\d.]+)\)'
+    for match in re.finditer(pattern2, text):
+        results.append({
+            "group": "extracted",
+            "mean": float(match.group(1)),
+            "sd": float(match.group(2)),
+            "source": match.group(0)
+        })
+
+    # Pattern 3: X +/- Y or X +- Y (mean +/- SD)
+    pattern3 = r'([\d.]+)\s*[+-]+/?[+-]*\s*([\d.]+)'
+    for match in re.finditer(pattern3, text):
+        mean_val = float(match.group(1))
+        sd_val = float(match.group(2))
+        # Filter out unreasonable values
+        if 0 < sd_val < mean_val * 10:
+            results.append({
+                "group": "extracted",
+                "mean": mean_val,
+                "sd": sd_val,
+                "source": match.group(0)
+            })
+
+    # Pattern 4: Look for group labels with values
+    # "Control: 5.2 (1.3)" or "Group 1: mean 5.2, SD 1.3"
+    pattern4 = r'([A-Za-z]+\s*(?:\d+)?(?:\s*group)?)\s*[:\-]\s*(?:[Mm]ean\s*)?(\d+\.?\d*)\s*[\(\s,]*(?:SD|sd|S\.D\.)?\s*[=:]?\s*(\d+\.?\d*)'
+    for match in re.finditer(pattern4, text, re.IGNORECASE):
+        try:
+            group = match.group(1).strip()
+            mean_val = float(match.group(2))
+            sd_val = float(match.group(3))
+            if 0 < sd_val < mean_val * 10:
+                results.append({
+                    "group": group,
+                    "mean": mean_val,
+                    "sd": sd_val,
+                    "source": match.group(0)
+                })
+        except (ValueError, IndexError):
+            pass
+
+    # Pattern 5: Table-like format with headers
+    # Look for lines with "Control" or "Experimental" followed by numbers
+    lines = text.split('\n')
+    for line in lines:
+        # Try to find group name followed by two numbers
+        match = re.search(r'(control|experimental|treatment|placebo|group\s*\d*|intervention)\s*[:\|\t,]+\s*([\d.]+)\s*[:\|\t,]+\s*([\d.]+)', line, re.IGNORECASE)
+        if match:
+            try:
+                results.append({
+                    "group": match.group(1).strip(),
+                    "mean": float(match.group(2)),
+                    "sd": float(match.group(3)),
+                    "source": line.strip()
+                })
+            except ValueError:
+                pass
+
+    # Remove duplicates based on mean/sd values
+    seen = set()
+    unique_results = []
+    for r in results:
+        key = (round(r["mean"], 4), round(r["sd"], 4))
+        if key not in seen:
+            seen.add(key)
+            unique_results.append(r)
+
+    return unique_results
+
+
+def calculate_cohens_d(mean1, sd1, mean2, sd2, n1=None, n2=None):
+    """
+    Calculate Cohen's d effect size from two groups.
+    Uses pooled SD if sample sizes provided, otherwise averaged SD.
+    """
+    if n1 and n2:
+        # Pooled SD
+        pooled_sd = np.sqrt(((n1 - 1) * sd1**2 + (n2 - 1) * sd2**2) / (n1 + n2 - 2))
+    else:
+        # Average SD
+        pooled_sd = np.sqrt((sd1**2 + sd2**2) / 2)
+
+    cohens_d = abs(mean1 - mean2) / pooled_sd
+    return round(cohens_d, 4)
+
+
+def calculate_sample_size_from_text(text, alpha=0.05, power=0.80):
+    """
+    Parse text for Mean/SD values and calculate required sample size.
+    Formula: N = 2 * sigma^2 * (Z_alpha/2 + Z_beta)^2 / delta^2
+    """
+    extracted = extract_mean_sd_from_text(text)
+
+    if len(extracted) < 2:
+        return {
+            "error": "Could not extract at least 2 groups with Mean/SD values",
+            "extracted_values": extracted,
+            "hint": "Text should contain values like 'Mean = X, SD = Y' for each group"
+        }
+
+    # Use first two groups
+    group1 = extracted[0]
+    group2 = extracted[1]
+
+    mean1, sd1 = group1["mean"], group1["sd"]
+    mean2, sd2 = group2["mean"], group2["sd"]
+
+    # Calculate effect size
+    cohens_d = calculate_cohens_d(mean1, sd1, mean2, sd2)
+
+    # Calculate pooled SD
+    pooled_sd = np.sqrt((sd1**2 + sd2**2) / 2)
+
+    # Mean difference
+    delta = abs(mean1 - mean2)
+
+    # Z-values
+    z_alpha = norm.ppf(1 - alpha / 2)
+    z_beta = norm.ppf(power)
+
+    # Sample size per group
+    if delta > 0:
+        n_per_group = int(np.ceil(2 * (pooled_sd**2) * ((z_alpha + z_beta)**2) / (delta**2)))
+    else:
+        n_per_group = None
+
+    return {
+        "group1": {
+            "name": group1.get("group", "Group 1"),
+            "mean": mean1,
+            "sd": sd1,
+            "source": group1.get("source", "")
+        },
+        "group2": {
+            "name": group2.get("group", "Group 2"),
+            "mean": mean2,
+            "sd": sd2,
+            "source": group2.get("source", "")
+        },
+        "effect_size": {
+            "cohens_d": cohens_d,
+            "interpretation": "Small" if cohens_d < 0.5 else "Medium" if cohens_d < 0.8 else "Large"
+        },
+        "calculation": {
+            "mean_difference": round(delta, 4),
+            "pooled_sd": round(pooled_sd, 4),
+            "alpha": alpha,
+            "power": power,
+            "z_alpha": round(z_alpha, 4),
+            "z_beta": round(z_beta, 4),
+            "n_per_group": n_per_group,
+            "total_n": n_per_group * 2 if n_per_group else None,
+            "formula": "N = 2 * sigma^2 * (Z_alpha/2 + Z_beta)^2 / delta^2"
+        },
+        "all_extracted": extracted
+    }
+
+
+# ---------------------------------------------------------------------------
+# PROPOSAL CONTEXT MODULE (RAG)
+# ---------------------------------------------------------------------------
+
+def set_proposal_context(text):
+    """Store proposal text and parse key elements for context injection."""
+    global _proposal_context
+
+    _proposal_context["text"] = text
+
+    # Extract variable names mentioned in proposal
+    # Common patterns: "Variable X", "measure Y", "assess Z"
+    var_patterns = [
+        r'(?:variable|measure|assess|evaluate|compare)\s+([A-Za-z_][A-Za-z0-9_\s]+)',
+        r'([A-Za-z_][A-Za-z0-9_]+)\s+(?:levels?|values?|scores?)',
+        r'(?:group\s*\d*|control|treatment|experimental|intervention|placebo)',
+    ]
+
+    variables = []
+    for pattern in var_patterns:
+        matches = re.findall(pattern, text, re.IGNORECASE)
+        variables.extend(matches)
+
+    _proposal_context["variables"] = list(set(v.strip() for v in variables if len(v.strip()) > 2))
+
+    # Extract methodology section
+    method_match = re.search(r'(?:method(?:ology)?|procedure|design)[:\s]+(.{100,500})', text, re.IGNORECASE | re.DOTALL)
+    if method_match:
+        _proposal_context["methodology"] = method_match.group(1).strip()
+
+    # Extract citations (basic pattern)
+    citation_patterns = [
+        r'\(([A-Za-z]+(?:\s+et\s+al\.?)?,?\s*\d{4})\)',  # (Author, 2020) or (Author et al., 2020)
+        r'([A-Za-z]+(?:\s+et\s+al\.?)?\s*\(\d{4}\))',     # Author (2020)
+    ]
+    citations = []
+    for pattern in citation_patterns:
+        matches = re.findall(pattern, text)
+        citations.extend(matches)
+    _proposal_context["citations"] = list(set(citations))
+
+    return {
+        "stored": True,
+        "text_length": len(text),
+        "variables_detected": _proposal_context["variables"],
+        "citations_found": len(_proposal_context["citations"]),
+        "methodology_extracted": bool(_proposal_context["methodology"])
+    }
+
+
+def get_proposal_context():
+    """Retrieve stored proposal context."""
+    return _proposal_context
+
+
+def map_variables_to_data(df, proposal_text=""):
+    """
+    Cross-reference proposal variables with data columns.
+    Returns mapping suggestions.
+    """
+    context = get_proposal_context()
+    if proposal_text:
+        set_proposal_context(proposal_text)
+        context = get_proposal_context()
+
+    data_columns = [str(c).lower() for c in df.columns]
+    proposal_vars = [v.lower() for v in context.get("variables", [])]
+
+    mappings = []
+
+    for pvar in proposal_vars:
+        best_match = None
+        best_score = 0
+
+        for dcol in data_columns:
+            # Simple matching score
+            score = 0
+            if pvar in dcol or dcol in pvar:
+                score = len(set(pvar.split()) & set(dcol.split())) + 1
+            elif any(word in dcol for word in pvar.split()):
+                score = 0.5
+
+            if score > best_score:
+                best_score = score
+                best_match = dcol
+
+        if best_match and best_score > 0:
+            mappings.append({
+                "proposal_variable": pvar,
+                "data_column": best_match,
+                "confidence": "high" if best_score > 1 else "medium"
+            })
+
+    return {
+        "mappings": mappings,
+        "unmapped_proposal_vars": [v for v in proposal_vars if v not in [m["proposal_variable"] for m in mappings]],
+        "unmapped_data_cols": [c for c in data_columns if c not in [m["data_column"] for m in mappings]]
+    }
+
+
+def check_references(proposal_text=""):
+    """
+    Analyze citations in proposal and suggest improvements.
+    """
+    context = get_proposal_context()
+    if proposal_text:
+        set_proposal_context(proposal_text)
+        context = get_proposal_context()
+
+    citations = context.get("citations", [])
+
+    analysis = {
+        "total_citations": len(citations),
+        "citations_list": citations,
+        "suggestions": [],
+        "quality_indicators": {}
+    }
+
+    # Basic quality checks
+    if len(citations) < 5:
+        analysis["suggestions"].append("Consider adding more references (minimum 10-15 for most research)")
+
+    # Check for recency (look for years)
+    years = []
+    for cite in citations:
+        year_match = re.search(r'\d{4}', cite)
+        if year_match:
+            years.append(int(year_match.group()))
+
+    if years:
+        avg_year = sum(years) / len(years)
+        oldest = min(years)
+        newest = max(years)
+        analysis["quality_indicators"] = {
+            "average_year": round(avg_year, 1),
+            "oldest_reference": oldest,
+            "newest_reference": newest,
+            "years_span": newest - oldest
+        }
+
+        if avg_year < 2018:
+            analysis["suggestions"].append("Consider updating references - average year is quite old")
+        if newest < 2022:
+            analysis["suggestions"].append("Add more recent references (2022-2024)")
+
+    return analysis
 
 # ---------------------------------------------------------------------------
 # WEB RESEARCH MODULE

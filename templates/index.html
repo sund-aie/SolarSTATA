@@ -28,6 +28,8 @@
         <div class="menu-item">
             Statistics
             <div class="menu-dropdown">
+                <div class="menu-dropdown-item" onclick="openModal('modal-smart-analyze')">[?] Smart Router (Auto-Select)</div>
+                <div class="menu-separator"></div>
                 <div class="menu-dropdown-item" onclick="openModal('modal-descriptive')">Descriptive Statistics</div>
                 <div class="menu-dropdown-item" onclick="openModal('modal-ttest')">T-Tests</div>
                 <div class="menu-dropdown-item" onclick="openModal('modal-anova')">ANOVA</div>
@@ -41,15 +43,21 @@
                 <div class="menu-separator"></div>
                 <div class="menu-dropdown-item" onclick="openModal('modal-power')">Power Analysis</div>
                 <div class="menu-dropdown-item" onclick="openModal('modal-samplesize')">Sample Size Calculator</div>
+                <div class="menu-dropdown-item" onclick="openModal('modal-samplesize-text')">[N] Sample Size from Text</div>
             </div>
         </div>
 
         <div class="menu-item">
             AI Assistant
             <div class="menu-dropdown">
-                <div class="menu-dropdown-item" onclick="runAIAnalysis()">Full AI Analysis <span class="shortcut">F5</span></div>
+                <div class="menu-dropdown-item" onclick="runAIAnalysis()">[AI] Full Analysis <span class="shortcut">F5</span></div>
+                <div class="menu-dropdown-item" onclick="openModal('modal-smart-analyze')">[?] Smart Statistical Router</div>
+                <div class="menu-separator"></div>
+                <div class="menu-dropdown-item" onclick="openModal('modal-proposal-upload')">[+] Upload Proposal (RAG)</div>
                 <div class="menu-dropdown-item" onclick="openModal('modal-ai-proposal')">Analyze Proposal</div>
-                <div class="menu-dropdown-item" onclick="openModal('modal-ai-research')">Literature Search</div>
+                <div class="menu-dropdown-item" onclick="openModal('modal-ai-research')">[#] Literature Search</div>
+                <div class="menu-separator"></div>
+                <div class="menu-dropdown-item" onclick="openModal('modal-samplesize-text')">[N] Sample Size from Text</div>
             </div>
         </div>
 
@@ -123,23 +131,28 @@
                     </div>
                     <div class="quick-actions">
                         <div class="quick-action" onclick="openFile()">
-                            <div class="icon">&#128194;</div>
+                            <div class="icon ascii-icon">[+]</div>
                             <div class="label">Open Data</div>
                             <div class="desc">CSV, Excel, Stata (.dta)</div>
                         </div>
                         <div class="quick-action" onclick="runAIAnalysis()">
-                            <div class="icon">&#129504;</div>
+                            <div class="icon ascii-icon">[AI]</div>
                             <div class="label">AI Analysis</div>
-                            <div class="desc">Auto-detect tests & analyze</div>
+                            <div class="desc">Auto-detect tests</div>
                         </div>
-                        <div class="quick-action" onclick="openModal('modal-samplesize')">
-                            <div class="icon">&#128202;</div>
+                        <div class="quick-action" onclick="openModal('modal-smart-analyze')">
+                            <div class="icon ascii-icon">[?]</div>
+                            <div class="label">Smart Router</div>
+                            <div class="desc">Auto-select test</div>
+                        </div>
+                        <div class="quick-action" onclick="openModal('modal-samplesize-text')">
+                            <div class="icon ascii-icon">[N]</div>
                             <div class="label">Sample Size</div>
-                            <div class="desc">Power analysis & calculation</div>
+                            <div class="desc">Parse Mean/SD from text</div>
                         </div>
                         <div class="quick-action" onclick="openModal('modal-ai-research')">
-                            <div class="icon">&#128218;</div>
-                            <div class="label">Literature Search</div>
+                            <div class="icon ascii-icon">[#]</div>
+                            <div class="label">Literature</div>
                             <div class="desc">PubMed & CrossRef</div>
                         </div>
                     </div>
@@ -655,8 +668,8 @@
 <div class="modal-overlay" id="modal-ai-research">
     <div class="modal">
         <div class="modal-header">
-            <div class="modal-title">Literature Search</div>
-            <div class="modal-close" onclick="closeModal('modal-ai-research')">&times;</div>
+            <div class="modal-title">[#] Literature Search</div>
+            <div class="modal-close" onclick="closeModal('modal-ai-research')">[x]</div>
         </div>
         <div class="modal-body">
             <div class="form-group">
@@ -664,12 +677,107 @@
                 <input type="text" id="research-query" class="form-control" placeholder="e.g., sample size ANOVA dental hardness">
             </div>
             <p style="font-size:11px;color:var(--text-muted);margin-top:8px;">
-                Searches PubMed and CrossRef for relevant academic papers.
+                &gt;&gt;&gt; Searches PubMed and CrossRef for relevant academic papers.
             </p>
         </div>
         <div class="modal-footer">
-            <button class="btn btn-secondary" onclick="closeModal('modal-ai-research')">Cancel</button>
-            <button class="btn btn-primary" onclick="doLiteratureSearch()">Search</button>
+            <button class="btn btn-secondary" onclick="closeModal('modal-ai-research')">[Cancel]</button>
+            <button class="btn btn-primary" onclick="doLiteratureSearch()">[Search]</button>
+        </div>
+    </div>
+</div>
+
+<!-- Smart Statistical Router -->
+<div class="modal-overlay" id="modal-smart-analyze">
+    <div class="modal">
+        <div class="modal-header">
+            <div class="modal-title">[?] Smart Statistical Router</div>
+            <div class="modal-close" onclick="closeModal('modal-smart-analyze')">[x]</div>
+        </div>
+        <div class="modal-body">
+            <p style="font-size:11px;color:var(--text-muted);margin-bottom:12px;">
+                &gt;&gt;&gt; Auto-selects the appropriate test based on variable types and data structure.
+            </p>
+            <div class="form-group">
+                <label>Select Variables (hold Ctrl for multiple)</label>
+                <select id="smart-vars" class="form-control var-multi-selector" data-type="any" multiple size="8"></select>
+            </div>
+            <div class="form-group">
+                <label>Subject/ID Variable (for repeated measures)</label>
+                <select id="smart-subject" class="form-control var-selector" data-type="any">
+                    <option value="">-- None --</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>Significance Level (alpha)</label>
+                <input type="number" id="smart-alpha" class="form-control" value="0.05" step="0.01">
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button class="btn btn-secondary" onclick="closeModal('modal-smart-analyze')">[Cancel]</button>
+            <button class="btn btn-primary" onclick="runSmartAnalyze()">[Analyze]</button>
+        </div>
+    </div>
+</div>
+
+<!-- Sample Size from Text -->
+<div class="modal-overlay" id="modal-samplesize-text">
+    <div class="modal" style="max-width:600px;">
+        <div class="modal-header">
+            <div class="modal-title">[N] Sample Size Calculator (Text Parser)</div>
+            <div class="modal-close" onclick="closeModal('modal-samplesize-text')">[x]</div>
+        </div>
+        <div class="modal-body">
+            <p style="font-size:11px;color:var(--text-muted);margin-bottom:12px;">
+                &gt;&gt;&gt; Paste text from previous studies. The AI will extract Mean/SD values and calculate sample size.
+            </p>
+            <div class="form-group">
+                <label>Paste Text with Mean/SD Values</label>
+                <textarea id="ss-text" class="form-control" rows="8" placeholder="e.g., 'Control group: Mean = 5.2, SD = 1.3
+Experimental group: Mean = 7.8, SD = 1.5'
+
+Or: 'The control group showed M=5.2 (SD=1.3) while treatment showed M=7.8 (SD=1.5)'
+
+Or: '5.2 +/- 1.3 vs 7.8 +/- 1.5'"></textarea>
+            </div>
+            <div class="form-group" style="display:flex;gap:12px;">
+                <div style="flex:1;">
+                    <label>Alpha</label>
+                    <input type="number" id="ss-text-alpha" class="form-control" value="0.05" step="0.01">
+                </div>
+                <div style="flex:1;">
+                    <label>Power</label>
+                    <input type="number" id="ss-text-power" class="form-control" value="0.80" step="0.01">
+                </div>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button class="btn btn-secondary" onclick="closeModal('modal-samplesize-text')">[Cancel]</button>
+            <button class="btn btn-primary" onclick="runSampleSizeFromText()">[Calculate]</button>
+        </div>
+    </div>
+</div>
+
+<!-- Proposal Upload (RAG Context) -->
+<div class="modal-overlay" id="modal-proposal-upload">
+    <div class="modal" style="max-width:600px;">
+        <div class="modal-header">
+            <div class="modal-title">[+] Upload Research Proposal</div>
+            <div class="modal-close" onclick="closeModal('modal-proposal-upload')">[x]</div>
+        </div>
+        <div class="modal-body">
+            <p style="font-size:11px;color:var(--text-muted);margin-bottom:12px;">
+                &gt;&gt;&gt; Upload or paste your research proposal. The AI will use it as context for analysis.
+            </p>
+            <div class="form-group">
+                <label>Paste Research Proposal Text</label>
+                <textarea id="proposal-text" class="form-control" rows="10" placeholder="Paste your research proposal, methodology section, or study description here..."></textarea>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button class="btn btn-secondary" onclick="closeModal('modal-proposal-upload')">[Cancel]</button>
+            <button class="btn btn-secondary" onclick="checkProposalReferences()">[Check References]</button>
+            <button class="btn btn-primary" onclick="uploadProposal()">[Store Context]</button>
         </div>
     </div>
 </div>
