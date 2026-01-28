@@ -566,12 +566,17 @@ async function sendAIMessage() {
     sendBtn.disabled = true;
     addAIMessage("system", "Analyzing...");
 
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 120000);
+
     try {
         const resp = await fetch("/api/ai/analyze", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ question: msg, research: true }),
+            signal: controller.signal,
         });
+        clearTimeout(timeoutId);
         const data = await resp.json();
 
         // Remove "Analyzing..." message
@@ -608,8 +613,13 @@ async function sendAIMessage() {
             addAIMessage("assistant", response || "Analysis complete. Check the Output tab for results.");
         }
     } catch (err) {
+        clearTimeout(timeoutId);
         removeLastAIMessage();
-        addAIMessage("assistant", `Error: ${err.message}`);
+        if (err.name === "AbortError") {
+            addAIMessage("assistant", "Request timed out. Make sure Ollama is installed and running (ollama serve). You can still use the statistical test buttons directly without AI.");
+        } else {
+            addAIMessage("assistant", `Error: ${err.message}. Make sure Ollama is running.`);
+        }
     }
 
     sendBtn.disabled = false;
@@ -640,23 +650,37 @@ async function runAIAnalysis() {
     }
 
     switchTab("output");
-    appendOutput("command", "ai analyze", "Running full AI analysis...");
+    appendOutput("command", "ai analyze", "Running full AI analysis (this may take up to 2 minutes)...");
+    setStatus("loading", "AI analysis running...");
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 120000);
 
     try {
         const resp = await fetch("/api/ai/analyze", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ proposal, research: true }),
+            signal: controller.signal,
         });
+        clearTimeout(timeoutId);
         const data = await resp.json();
 
         if (data.error) {
             updateLastOutput("ai analyze", data.error, "error");
+            setStatus("error", "AI analysis failed");
         } else {
             updateLastOutput("ai analyze", data.result?.stdout || "Complete. See results.");
+            setStatus("ok", "AI analysis complete");
         }
     } catch (err) {
-        updateLastOutput("ai analyze", `Error: ${err.message}`, "error");
+        clearTimeout(timeoutId);
+        if (err.name === "AbortError") {
+            updateLastOutput("ai analyze", "Error: AI analysis timed out. The Ollama model may not be running.\n\nTo fix this:\n  1. Install Ollama: https://ollama.com\n  2. Run: ollama pull llama3.2\n  3. Make sure Ollama is running, then try again.\n\nAlternatively, use the individual statistical test buttons (Describe, T-Test, ANOVA, etc.) which work without AI.", "error");
+        } else {
+            updateLastOutput("ai analyze", `Error: ${err.message}\n\nMake sure Ollama is installed and running (ollama serve).\nThe AI features require a local Ollama instance with llama3.2.`, "error");
+        }
+        setStatus("error", "AI analysis failed");
     }
 }
 
