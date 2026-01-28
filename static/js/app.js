@@ -567,7 +567,7 @@ async function sendAIMessage() {
     addAIMessage("system", "Analyzing...");
 
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 120000);
+    const timeoutId = setTimeout(() => controller.abort(), 300000);  // 5 minutes
 
     try {
         const resp = await fetch("/api/ai/analyze", {
@@ -650,11 +650,11 @@ async function runAIAnalysis() {
     }
 
     switchTab("output");
-    appendOutput("command", "ai analyze", "Running full AI analysis (this may take up to 2 minutes)...");
+    appendOutput("command", "ai analyze", "Running full AI analysis (this may take up to 5 minutes)...");
     setStatus("loading", "AI analysis running...");
 
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 120000);
+    const timeoutId = setTimeout(() => controller.abort(), 300000);  // 5 minutes
 
     try {
         const resp = await fetch("/api/ai/analyze", {
