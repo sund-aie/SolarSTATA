@@ -691,15 +691,39 @@ def analyze_data(dataframe, proposal_text="", user_question="", do_research=True
 
         print("[SolarSTATA] AI is analyzing (this may take a moment)...")
         try:
-            response = ollama.chat(
-                model="llama3.2",
-                messages=[
-                    {"role": "system", "content": "You are an expert biostatistician. Generate precise, executable Python code for statistical analysis. Always use the stats_engine (se) module functions."},
-                    {"role": "user", "content": prompt},
-                ],
-                options={"timeout": 60},
-            )
-            ai_response = response["message"]["content"]
+            # Use a timeout for the Ollama call - wrap in a thread
+            import threading
+            import queue
+
+            result_queue = queue.Queue()
+
+            def call_ollama():
+                try:
+                    resp = ollama.chat(
+                        model="llama3.2",
+                        messages=[
+                            {"role": "system", "content": "You are an expert biostatistician. Generate precise, executable Python code for statistical analysis. Always use the stats_engine (se) module functions."},
+                            {"role": "user", "content": prompt},
+                        ],
+                    )
+                    result_queue.put(("success", resp["message"]["content"]))
+                except Exception as e:
+                    result_queue.put(("error", str(e)))
+
+            thread = threading.Thread(target=call_ollama)
+            thread.start()
+            thread.join(timeout=180)  # 3 minute timeout for Ollama
+
+            if thread.is_alive():
+                # Timeout - fall back to automated analysis
+                print("[SolarSTATA] AI model timed out, running automated analysis...")
+                return run_automated_analysis(clean_df, data_info, suggestions, proposal_text)
+
+            status, result = result_queue.get_nowait()
+            if status == "error":
+                raise Exception(result)
+            ai_response = result
+
         except Exception as e:
             # If Ollama is not available or times out, run suggested tests directly
             print(f"[SolarSTATA] AI model unavailable ({e}), running automated analysis...")
