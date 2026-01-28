@@ -691,13 +691,17 @@ def analyze_data(dataframe, proposal_text="", user_question="", do_research=True
 
         print("[SolarSTATA] AI is analyzing (this may take a moment)...")
         try:
-            response = ollama.chat(model="llama3.2", messages=[
-                {"role": "system", "content": "You are an expert biostatistician. Generate precise, executable Python code for statistical analysis. Always use the stats_engine (se) module functions."},
-                {"role": "user", "content": prompt},
-            ])
+            response = ollama.chat(
+                model="llama3.2",
+                messages=[
+                    {"role": "system", "content": "You are an expert biostatistician. Generate precise, executable Python code for statistical analysis. Always use the stats_engine (se) module functions."},
+                    {"role": "user", "content": prompt},
+                ],
+                options={"timeout": 60},
+            )
             ai_response = response["message"]["content"]
         except Exception as e:
-            # If Ollama is not available, run suggested tests directly
+            # If Ollama is not available or times out, run suggested tests directly
             print(f"[SolarSTATA] AI model unavailable ({e}), running automated analysis...")
             ai_response = None
             return run_automated_analysis(clean_df, data_info, suggestions, proposal_text)

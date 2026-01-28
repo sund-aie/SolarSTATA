@@ -31,8 +31,8 @@
     --scrollbar-bg: #1e1e2e;
     --scrollbar-thumb: #4a4a66;
     --shadow: 0 2px 8px rgba(0,0,0,0.3);
-    --font-mono: 'Consolas', 'Monaco', 'Courier New', monospace;
-    --font-ui: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
+    --font-mono: 'VT323', 'Consolas', 'Courier New', monospace;
+    --font-ui: 'Silkscreen', 'Press Start 2P', cursive;
 }
 
 * {
@@ -50,7 +50,7 @@ body {
     font-family: var(--font-ui);
     background: var(--bg-primary);
     color: var(--text-primary);
-    font-size: 13px;
+    font-size: 12px;
 }
 
 /* ---- SCROLLBAR ---- */
@@ -92,10 +92,11 @@ body {
 
 #menu-bar .app-title {
     font-weight: 700;
-    font-size: 14px;
+    font-size: 13px;
     color: var(--accent-blue);
     margin-right: 20px;
     letter-spacing: 0.5px;
+    font-family: 'Press Start 2P', var(--font-ui);
 }
 
 #menu-bar .app-title span {
@@ -347,7 +348,7 @@ body {
     width: 100%;
     border-collapse: collapse;
     font-family: var(--font-mono);
-    font-size: 12px;
+    font-size: 15px;
 }
 .data-table thead {
     position: sticky;
@@ -397,8 +398,8 @@ body {
     padding: 12px 16px;
     background: var(--output-bg);
     font-family: var(--font-mono);
-    font-size: 12px;
-    line-height: 1.5;
+    font-size: 16px;
+    line-height: 1.4;
     color: var(--output-text);
     white-space: pre-wrap;
     word-wrap: break-word;
@@ -468,7 +469,7 @@ body {
     color: var(--text-bright);
     padding: 6px 10px;
     font-family: var(--font-mono);
-    font-size: 12px;
+    font-size: 15px;
     border-radius: 3px;
     outline: none;
 }
@@ -847,10 +848,11 @@ textarea.form-control {
 }
 
 #welcome-screen h1 {
-    font-size: 32px;
+    font-size: 28px;
     color: var(--accent-blue);
     margin-bottom: 8px;
-    font-weight: 300;
+    font-weight: 400;
+    font-family: 'Press Start 2P', var(--font-ui);
 }
 #welcome-screen h1 strong {
     font-weight: 700;
