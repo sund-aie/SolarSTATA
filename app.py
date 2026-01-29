@@ -13,6 +13,7 @@ from werkzeug.utils import secure_filename
 
 import stats_engine as se
 import ai_brain
+import agent_core
 
 app = Flask(__name__)
 app.secret_key = os.urandom(24)
@@ -616,6 +617,150 @@ def sample_size_from_text():
     result = ai_brain.calculate_sample_size_from_text(text, alpha, power)
     log_command("sample size from text")
     return jsonify({"result": json.loads(json.dumps(result, default=numpy_safe))})
+
+
+# ---------------------------------------------------------------------------
+# AGENT CORE API
+# ---------------------------------------------------------------------------
+
+@app.route("/api/agent/models")
+def get_agent_models():
+    """Get list of available Ollama models."""
+    try:
+        models = agent_core.get_available_models()
+        current = agent_core.get_model()
+        is_running = agent_core.check_ollama_running()
+        return jsonify({
+            "models": models,
+            "current": current,
+            "ollama_running": is_running
+        })
+    except Exception as e:
+        return jsonify({"error": str(e), "models": ["llama3.2"], "current": "llama3.2", "ollama_running": False})
+
+
+@app.route("/api/agent/models", methods=["POST"])
+def set_agent_model():
+    """Set the active Ollama model."""
+    data = request.json or {}
+    model_name = data.get("model", "llama3.2")
+    agent_core.set_model(model_name)
+    return jsonify({"success": True, "model": model_name})
+
+
+@app.route("/api/agent/messy_data", methods=["POST"])
+def analyze_messy_data():
+    """
+    Messy Data Analysis Agent:
+    1. AI cleans/structures the raw data
+    2. Python runs ANOVA + post-hoc tests
+    3. AI interprets the results
+    """
+    data = request.json or {}
+    raw_text = data.get("raw_text", "")
+    context = data.get("context", "")
+
+    if not raw_text:
+        return jsonify({"error": "No data text provided"}), 400
+
+    try:
+        result = agent_core.run_messy_data_analysis(raw_text, context)
+        log_command("agent messy_data")
+        return jsonify({"result": json.loads(json.dumps(result, default=numpy_safe))})
+    except Exception as e:
+        return jsonify({"error": str(e), "traceback": traceback.format_exc()}), 500
+
+
+@app.route("/api/agent/sample_size_auto", methods=["POST"])
+def sample_size_auto():
+    """
+    AI-powered sample size calculation via web search.
+    Searches for similar studies and extracts Mean/SD to compute effect size.
+    """
+    data = request.json or {}
+    topic = data.get("topic", "")
+
+    if not topic:
+        return jsonify({"error": "No research topic provided"}), 400
+
+    try:
+        result = agent_core.search_for_sample_size_data(topic)
+        log_command(f'agent sample_size_auto "{topic[:50]}"')
+        return jsonify({"result": json.loads(json.dumps(result, default=numpy_safe))})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/agent/sample_size_manual", methods=["POST"])
+def sample_size_manual():
+    """Manual sample size calculation with user-provided effect size."""
+    data = request.json or {}
+    effect_size = data.get("effect_size", 0.5)
+    alpha = data.get("alpha", 0.05)
+    power = data.get("power", 0.80)
+    test_type = data.get("test_type", "t-test")
+
+    result = agent_core.calculate_sample_size_manual(effect_size, alpha, power, test_type)
+    log_command("agent sample_size_manual")
+    return jsonify({"result": json.loads(json.dumps(result, default=numpy_safe))})
+
+
+@app.route("/api/agent/literature_review", methods=["POST"])
+def literature_review():
+    """
+    Literature Review Agent:
+    1. Searches academic sources
+    2. AI synthesizes into coherent review
+    3. Returns with numbered citations
+    """
+    data = request.json or {}
+    topic = data.get("topic", "")
+    context = data.get("context", "")
+
+    if not topic:
+        return jsonify({"error": "No research topic provided"}), 400
+
+    try:
+        result = agent_core.generate_literature_review(topic, context)
+        log_command(f'agent literature_review "{topic[:50]}"')
+        return jsonify({"result": json.loads(json.dumps(result, default=numpy_safe))})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/agent/web_search", methods=["POST"])
+def agent_web_search():
+    """Direct web search via DuckDuckGo."""
+    data = request.json or {}
+    query = data.get("query", "")
+    max_results = data.get("max_results", 5)
+
+    if not query:
+        return jsonify({"error": "No search query provided"}), 400
+
+    results = agent_core.search_web(query, max_results)
+    return jsonify({"results": results})
+
+
+@app.route("/api/agent/parse_pdf", methods=["POST"])
+def parse_pdf_endpoint():
+    """Parse text from uploaded PDF file."""
+    if "file" not in request.files:
+        return jsonify({"error": "No file uploaded"}), 400
+
+    file = request.files["file"]
+    if file.filename == "":
+        return jsonify({"error": "No file selected"}), 400
+
+    if not file.filename.lower().endswith(".pdf"):
+        return jsonify({"error": "File must be a PDF"}), 400
+
+    try:
+        pdf_bytes = file.read()
+        text = agent_core.parse_pdf_bytes(pdf_bytes)
+        return jsonify({"success": True, "text": text, "filename": file.filename})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 
 # ---------------------------------------------------------------------------

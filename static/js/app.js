@@ -28,6 +28,7 @@ document.addEventListener("DOMContentLoaded", () => {
     initFileUpload();
     initRightPanel();
     initKeyboardShortcuts();
+    loadAvailableModels();
     showToast("SolarSTATA ready. Load data to begin.", "success");
 });
 
@@ -1123,5 +1124,401 @@ async function checkProposalReferences() {
 
     } catch (err) {
         showToast(`Error: ${err.message}`, "error");
+    }
+}
+
+// ============================================================
+// AGENT CORE: MODEL MANAGEMENT
+// ============================================================
+async function loadAvailableModels() {
+    try {
+        const resp = await fetch("/api/agent/models");
+        const data = await resp.json();
+
+        const select = document.getElementById("model-select");
+        const status = document.getElementById("ollama-status");
+
+        if (select && data.models) {
+            select.innerHTML = "";
+            data.models.forEach(model => {
+                const opt = document.createElement("option");
+                opt.value = model;
+                opt.textContent = model;
+                if (model === data.current) opt.selected = true;
+                select.appendChild(opt);
+            });
+        }
+
+        if (status) {
+            if (data.ollama_running) {
+                status.style.background = "var(--accent-green)";
+                status.title = "Ollama running";
+            } else {
+                status.style.background = "var(--accent-red)";
+                status.title = "Ollama not running";
+            }
+        }
+    } catch (err) {
+        const status = document.getElementById("ollama-status");
+        if (status) {
+            status.style.background = "var(--accent-red)";
+            status.title = "Cannot connect to Ollama";
+        }
+    }
+}
+
+async function changeModel(modelName) {
+    try {
+        await fetch("/api/agent/models", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ model: modelName }),
+        });
+        showToast(`Model changed to ${modelName}`, "success");
+    } catch (err) {
+        showToast(`Failed to change model: ${err.message}`, "error");
+    }
+}
+
+// ============================================================
+// AGENT: MESSY DATA ANALYSIS
+// ============================================================
+async function runMessyDataAnalysis() {
+    const rawText = document.getElementById("messy-data-text")?.value || "";
+    const context = document.getElementById("messy-data-context")?.value || "";
+
+    if (!rawText.trim()) {
+        showToast("Paste your messy data first", "error");
+        return;
+    }
+
+    closeModal("modal-messy-data");
+    switchTab("output");
+    appendOutput("command", "agent messy_data", ">>> Analyzing messy data (AI cleaning + Python ANOVA)...");
+    setStatus("loading", "Agent analyzing data...");
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 180000); // 3 minutes
+
+    try {
+        const resp = await fetch("/api/agent/messy_data", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ raw_text: rawText, context }),
+            signal: controller.signal,
+        });
+        clearTimeout(timeoutId);
+        const data = await resp.json();
+
+        if (data.error || data.result?.error) {
+            updateLastOutput("agent messy_data", data.error || data.result.error, "error");
+            setStatus("error", "Analysis failed");
+            return;
+        }
+
+        const result = data.result;
+        let output = "=" .repeat(60) + "\n";
+        output += "  MESSY DATA ANALYSIS RESULTS\n";
+        output += "=" .repeat(60) + "\n\n";
+
+        // Structured Data
+        if (result.structured_data) {
+            output += "--- Extracted Structure ---\n";
+            output += `  Groups: ${result.structured_data.groups?.join(", ") || "N/A"}\n`;
+            output += `  Time Points: ${result.structured_data.timepoints?.join(", ") || "N/A"}\n\n`;
+        }
+
+        // Statistics
+        if (result.statistics) {
+            output += "--- ANOVA Results (Python scipy) ---\n";
+            const stats = result.statistics;
+
+            if (stats.anova_results) {
+                Object.entries(stats.anova_results).forEach(([tp, res]) => {
+                    output += `\n  [${tp}]\n`;
+                    output += `    F-statistic: ${res.F_statistic}\n`;
+                    output += `    p-value: ${res.p_value}`;
+                    output += res.significant ? " ***\n" : "\n";
+                });
+            }
+
+            if (stats.descriptive_stats) {
+                output += "\n--- Descriptive Statistics ---\n";
+                Object.entries(stats.descriptive_stats).forEach(([tp, groups]) => {
+                    output += `\n  [${tp}]\n`;
+                    Object.entries(groups).forEach(([group, ds]) => {
+                        output += `    ${group}: Mean=${ds.mean}, SD=${ds.std}, N=${ds.n}\n`;
+                    });
+                });
+            }
+
+            if (stats.posthoc_results && Object.keys(stats.posthoc_results).length > 0) {
+                output += "\n--- Post-Hoc Tukey HSD ---\n";
+                Object.entries(stats.posthoc_results).forEach(([tp, comparisons]) => {
+                    output += `\n  [${tp}]\n`;
+                    if (Array.isArray(comparisons)) {
+                        comparisons.forEach(c => {
+                            output += `    ${c.group1} vs ${c.group2}: diff=${c.mean_diff}, p=${c.p_adj}`;
+                            output += c.significant ? " *\n" : "\n";
+                        });
+                    }
+                });
+            }
+        }
+
+        // Interpretation
+        if (result.interpretation) {
+            output += "\n--- AI Interpretation ---\n";
+            output += result.interpretation + "\n";
+        }
+
+        output += "\n" + "=" .repeat(60);
+        updateLastOutput("agent messy_data", output);
+        setStatus("ok", "Analysis complete");
+        showToast("Messy data analysis complete", "success");
+
+    } catch (err) {
+        clearTimeout(timeoutId);
+        if (err.name === "AbortError") {
+            updateLastOutput("agent messy_data", "Error: Analysis timed out. Make sure Ollama is running.", "error");
+        } else {
+            updateLastOutput("agent messy_data", `Error: ${err.message}`, "error");
+        }
+        setStatus("error", "Analysis failed");
+    }
+}
+
+// ============================================================
+// AGENT: DUAL-MODE SAMPLE SIZE CALCULATOR
+// ============================================================
+let sampleSizeMode = "ai";
+
+function switchSampleSizeMode(mode) {
+    sampleSizeMode = mode;
+    const aiBtn = document.getElementById("ss-dual-ai-btn");
+    const manualBtn = document.getElementById("ss-dual-manual-btn");
+    const aiMode = document.getElementById("ss-dual-ai-mode");
+    const manualMode = document.getElementById("ss-dual-manual-mode");
+
+    if (mode === "ai") {
+        aiBtn.className = "btn btn-primary";
+        manualBtn.className = "btn btn-secondary";
+        aiMode.style.display = "";
+        manualMode.style.display = "none";
+    } else {
+        aiBtn.className = "btn btn-secondary";
+        manualBtn.className = "btn btn-primary";
+        aiMode.style.display = "none";
+        manualMode.style.display = "";
+    }
+}
+
+async function runDualSampleSize() {
+    closeModal("modal-sample-size-dual");
+    switchTab("output");
+
+    if (sampleSizeMode === "ai") {
+        const topic = document.getElementById("ss-dual-topic")?.value || "";
+        if (!topic.trim()) {
+            showToast("Enter a research topic", "error");
+            return;
+        }
+
+        appendOutput("command", `agent sample_size_auto "${topic.substring(0, 40)}..."`, ">>> Searching for similar studies and extracting effect size...");
+        setStatus("loading", "Agent searching literature...");
+
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 180000);
+
+        try {
+            const resp = await fetch("/api/agent/sample_size_auto", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ topic }),
+                signal: controller.signal,
+            });
+            clearTimeout(timeoutId);
+            const data = await resp.json();
+
+            if (data.error || data.result?.error) {
+                updateLastOutput("agent sample_size_auto", data.error || data.result.error, "error");
+                setStatus("error", "Search failed");
+                return;
+            }
+
+            const result = data.result;
+            let output = "=" .repeat(60) + "\n";
+            output += "  AI-POWERED SAMPLE SIZE CALCULATION\n";
+            output += "=" .repeat(60) + "\n\n";
+            output += `Topic: ${topic}\n\n`;
+
+            // Search results
+            if (result.search_results?.length > 0) {
+                output += "--- Literature Search Results ---\n";
+                result.search_results.slice(0, 5).forEach((r, i) => {
+                    if (!r.error) {
+                        output += `  [${i+1}] ${r.title || "N/A"}\n`;
+                        output += `      ${r.body?.substring(0, 100) || ""}...\n`;
+                    }
+                });
+                output += "\n";
+            }
+
+            // Extracted data
+            if (result.extracted_data?.studies_found?.length > 0) {
+                output += "--- Extracted Mean/SD Data ---\n";
+                result.extracted_data.studies_found.forEach((s, i) => {
+                    output += `  Study ${i+1}: ${s.title || "N/A"}\n`;
+                    if (s.control_mean !== undefined) {
+                        output += `    Control: Mean=${s.control_mean}, SD=${s.control_sd}\n`;
+                    }
+                    if (s.treatment_mean !== undefined) {
+                        output += `    Treatment: Mean=${s.treatment_mean}, SD=${s.treatment_sd}\n`;
+                    }
+                });
+                output += "\n";
+            }
+
+            // Sample size calculation
+            if (result.sample_size) {
+                const ss = result.sample_size;
+                output += "--- Sample Size Calculation ---\n";
+                output += `  Effect Size (Cohen's d): ${ss.effect_size} (${ss.interpretation})\n`;
+                output += `  Alpha: ${ss.alpha}, Power: ${ss.power}\n`;
+                output += `  Source: ${ss.source_study}\n\n`;
+                output += `  >>> REQUIRED N PER GROUP: ${ss.n_per_group}\n`;
+                output += `  >>> TOTAL N: ${ss.total_n}\n`;
+            }
+
+            output += "\n" + "=" .repeat(60);
+            updateLastOutput("agent sample_size_auto", output);
+            setStatus("ok", "Calculation complete");
+            showToast("Sample size calculated", "success");
+
+        } catch (err) {
+            clearTimeout(timeoutId);
+            if (err.name === "AbortError") {
+                updateLastOutput("agent sample_size_auto", "Error: Search timed out.", "error");
+            } else {
+                updateLastOutput("agent sample_size_auto", `Error: ${err.message}`, "error");
+            }
+            setStatus("error", "Calculation failed");
+        }
+
+    } else {
+        // Manual mode
+        const effectSize = parseFloat(document.getElementById("ss-dual-effect")?.value) || 0.5;
+        const alpha = parseFloat(document.getElementById("ss-dual-alpha")?.value) || 0.05;
+        const power = parseFloat(document.getElementById("ss-dual-power")?.value) || 0.80;
+        const testType = document.getElementById("ss-dual-test")?.value || "t-test";
+
+        appendOutput("command", "agent sample_size_manual", ">>> Calculating sample size...");
+
+        try {
+            const resp = await fetch("/api/agent/sample_size_manual", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ effect_size: effectSize, alpha, power, test_type: testType }),
+            });
+            const data = await resp.json();
+
+            if (data.error || data.result?.error) {
+                updateLastOutput("agent sample_size_manual", data.error || data.result.error, "error");
+                return;
+            }
+
+            const result = data.result;
+            let output = "=" .repeat(60) + "\n";
+            output += "  MANUAL SAMPLE SIZE CALCULATION\n";
+            output += "=" .repeat(60) + "\n\n";
+            output += "--- Parameters ---\n";
+            output += `  Test Type: ${result.test_type}\n`;
+            output += `  Effect Size: ${result.effect_size} (${result.interpretation})\n`;
+            output += `  Alpha: ${result.alpha}\n`;
+            output += `  Power: ${result.power}\n\n`;
+            output += `  >>> REQUIRED N PER GROUP: ${result.n_per_group}\n`;
+            output += `  >>> TOTAL N: ${result.total_n}\n`;
+            output += "\n" + "=" .repeat(60);
+
+            updateLastOutput("agent sample_size_manual", output);
+            showToast("Sample size calculated", "success");
+
+        } catch (err) {
+            updateLastOutput("agent sample_size_manual", `Error: ${err.message}`, "error");
+        }
+    }
+}
+
+// ============================================================
+// AGENT: LITERATURE REVIEW
+// ============================================================
+async function runLiteratureReview() {
+    const topic = document.getElementById("lit-review-topic")?.value || "";
+    const context = document.getElementById("lit-review-context")?.value || "";
+
+    if (!topic.trim()) {
+        showToast("Enter a research topic", "error");
+        return;
+    }
+
+    closeModal("modal-lit-review");
+    switchTab("output");
+    appendOutput("command", `agent literature_review "${topic.substring(0, 40)}..."`, ">>> Searching literature and generating review...");
+    setStatus("loading", "Agent generating literature review...");
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 180000);
+
+    try {
+        const resp = await fetch("/api/agent/literature_review", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ topic, context }),
+            signal: controller.signal,
+        });
+        clearTimeout(timeoutId);
+        const data = await resp.json();
+
+        if (data.error || data.result?.error) {
+            updateLastOutput("agent literature_review", data.error || data.result.error, "error");
+            setStatus("error", "Generation failed");
+            return;
+        }
+
+        const result = data.result;
+        let output = "=" .repeat(60) + "\n";
+        output += "  LITERATURE REVIEW\n";
+        output += "=" .repeat(60) + "\n\n";
+        output += `Topic: ${topic}\n`;
+        output += `Sources searched: ${result.sources_searched || 0}\n\n`;
+
+        // Review text
+        if (result.review) {
+            output += "--- Review ---\n\n";
+            output += result.review + "\n\n";
+        }
+
+        // References
+        if (result.references?.length > 0) {
+            output += "--- References ---\n";
+            result.references.forEach(ref => {
+                output += `  [${ref.number}] ${ref.title}\n`;
+                output += `      ${ref.url}\n`;
+            });
+        }
+
+        output += "\n" + "=" .repeat(60);
+        updateLastOutput("agent literature_review", output);
+        setStatus("ok", "Review complete");
+        showToast("Literature review generated", "success");
+
+    } catch (err) {
+        clearTimeout(timeoutId);
+        if (err.name === "AbortError") {
+            updateLastOutput("agent literature_review", "Error: Generation timed out.", "error");
+        } else {
+            updateLastOutput("agent literature_review", `Error: ${err.message}`, "error");
+        }
+        setStatus("error", "Generation failed");
     }
 }
