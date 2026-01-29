@@ -1001,31 +1001,63 @@ textarea.form-control {
    RETRO ASCII AESTHETIC
    ============================================================ */
 
+/* Model Selector in Toolbar */
+.model-selector {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11px;
+    color: var(--text-secondary);
+    margin-left: auto;
+}
+.model-selector label {
+    font-family: var(--font-mono);
+}
+.model-selector select {
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-color);
+    color: var(--text-primary);
+    padding: 3px 8px;
+    font-size: 11px;
+    border-radius: 3px;
+    font-family: var(--font-mono);
+    cursor: pointer;
+}
+.model-selector select:focus {
+    border-color: var(--accent-blue);
+    outline: none;
+}
+.status-indicator-small {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--text-muted);
+}
+
 /* ASCII Icon Styling */
 .ascii-icon {
     font-family: var(--font-mono);
     font-weight: 700;
     font-size: 20px;
     color: var(--accent-cyan);
-    text-shadow: 0 0 5px var(--accent-cyan), 0 0 10px rgba(0, 229, 255, 0.3);
     letter-spacing: 2px;
 }
 
-/* Quick Action Cards - Retro Style */
+/* Quick Action Cards - Flat Style */
 .quick-action {
     border: 2px solid var(--border-color);
-    background: linear-gradient(135deg, var(--bg-secondary) 0%, var(--bg-panel) 100%);
+    background: var(--bg-secondary);
     transition: all 0.2s ease;
 }
 .quick-action:hover {
     border-color: var(--accent-cyan);
-    box-shadow: 0 0 15px rgba(0, 229, 255, 0.2), inset 0 0 20px rgba(0, 229, 255, 0.05);
+    background: var(--bg-hover);
 }
 .quick-action:hover .ascii-icon {
-    text-shadow: 0 0 10px var(--accent-cyan), 0 0 20px rgba(0, 229, 255, 0.5);
+    color: var(--accent-blue);
 }
 
-/* Modal Close Button - Retro */
+/* Modal Close Button - Flat */
 .modal-close {
     font-family: var(--font-mono);
     font-size: 16px;
@@ -1033,17 +1065,16 @@ textarea.form-control {
 }
 .modal-close:hover {
     color: var(--accent-red);
-    text-shadow: 0 0 5px var(--accent-red);
 }
 
-/* Button Retro Style */
+/* Button Flat Style */
 .btn {
     font-family: var(--font-mono);
     letter-spacing: 1px;
     text-transform: uppercase;
 }
 .btn:hover {
-    text-shadow: 0 0 5px currentColor;
+    opacity: 0.9;
 }
 
 /* Output Area - Terminal Style */
@@ -1096,7 +1127,7 @@ textarea.form-control {
     color: var(--accent-cyan);
 }
 
-/* Tab Bar - Pixelated */
+/* Tab Bar - Flat */
 .tab {
     font-family: var(--font-mono);
     letter-spacing: 1px;
@@ -1104,7 +1135,7 @@ textarea.form-control {
 }
 .tab.active {
     border-bottom: 2px solid var(--accent-cyan);
-    text-shadow: 0 0 5px var(--accent-cyan);
+    color: var(--accent-cyan);
 }
 
 /* Menu Items */
@@ -1115,29 +1146,26 @@ textarea.form-control {
     font-family: var(--font-mono);
 }
 .menu-dropdown-item:hover {
-    text-shadow: 0 0 5px var(--accent-cyan);
+    background: var(--accent-blue);
 }
 
-/* Welcome Screen - Retro */
+/* Welcome Screen - Flat */
 #welcome-screen h1 {
-    text-shadow:
-        0 0 10px var(--accent-blue),
-        0 0 20px rgba(74, 158, 255, 0.5),
-        0 0 40px rgba(74, 158, 255, 0.3);
+    color: var(--accent-blue);
 }
 #welcome-screen .version {
     font-family: var(--font-mono);
     letter-spacing: 2px;
 }
 
-/* Toolbar Buttons - Pixel Style */
+/* Toolbar Buttons - Flat Style */
 .toolbar-btn {
     font-family: var(--font-mono);
     text-transform: uppercase;
     letter-spacing: 1px;
 }
 .toolbar-btn:hover {
-    text-shadow: 0 0 5px var(--accent-cyan);
+    color: var(--accent-cyan);
 }
 
 /* Variables Panel - Terminal List */
@@ -1158,14 +1186,14 @@ textarea.form-control {
     text-transform: uppercase;
 }
 
-/* Form Controls - Retro Input */
+/* Form Controls - Flat Input */
 .form-control {
     font-family: var(--font-mono);
     border: 1px solid var(--border-color);
 }
 .form-control:focus {
     border-color: var(--accent-cyan);
-    box-shadow: 0 0 5px rgba(0, 229, 255, 0.3);
+    outline: none;
 }
 
 /* Data Table - Grid Style */
@@ -1184,7 +1212,7 @@ textarea.form-control {
     letter-spacing: 1px;
 }
 .right-tab.active {
-    text-shadow: 0 0 5px var(--accent-cyan);
+    color: var(--accent-cyan);
 }
 
 /* Properties - Terminal Style */
