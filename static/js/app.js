@@ -1450,6 +1450,293 @@ async function runDualSampleSize() {
 }
 
 // ============================================================
+// UNIVERSAL STATISTICAL ANALYSIS AGENT (3-LAYER)
+// ============================================================
+
+let universalFileData = null;
+
+function handleDragOver(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    e.currentTarget.classList.add("drag-over");
+}
+
+function handleDragLeave(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    e.currentTarget.classList.remove("drag-over");
+}
+
+function handleFileDrop(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    e.currentTarget.classList.remove("drag-over");
+
+    const files = e.dataTransfer.files;
+    if (files.length > 0) {
+        processUniversalFile(files[0]);
+    }
+}
+
+function handleFileSelect(e) {
+    const files = e.target.files;
+    if (files.length > 0) {
+        processUniversalFile(files[0]);
+    }
+}
+
+// Click handler for drop zone
+document.addEventListener("DOMContentLoaded", () => {
+    const dropZone = document.getElementById("universal-drop-zone");
+    if (dropZone) {
+        dropZone.addEventListener("click", () => {
+            document.getElementById("universal-file-input").click();
+        });
+    }
+});
+
+function processUniversalFile(file) {
+    const validTypes = [".csv", ".xlsx", ".xls"];
+    const ext = file.name.substring(file.name.lastIndexOf(".")).toLowerCase();
+
+    if (!validTypes.includes(ext)) {
+        showToast("Please upload a CSV or Excel file", "error");
+        return;
+    }
+
+    // For CSV, read as text directly
+    if (ext === ".csv") {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            document.getElementById("universal-data-text").value = e.target.result;
+            universalFileData = null; // Using text mode
+            showFileStatus(file.name);
+        };
+        reader.readAsText(file);
+    } else {
+        // For Excel, we'll send the file to the server
+        universalFileData = file;
+        showFileStatus(file.name);
+        document.getElementById("universal-data-text").value = "";
+        document.getElementById("universal-data-text").placeholder = `File loaded: ${file.name}\n\nData will be extracted from the Excel file.`;
+    }
+}
+
+function showFileStatus(filename) {
+    const status = document.getElementById("universal-file-status");
+    const nameEl = document.getElementById("universal-file-name");
+    if (status && nameEl) {
+        nameEl.textContent = `File: ${filename}`;
+        status.style.display = "block";
+    }
+}
+
+function clearUniversalFile() {
+    universalFileData = null;
+    document.getElementById("universal-data-text").value = "";
+    document.getElementById("universal-data-text").placeholder = `Paste data from Excel/CSV...
+
+Example formats (AI will understand ANY layout):
+Group A: 5.2, 5.4, 5.1, 5.3
+Group B: 7.2, 7.0, 7.4, 7.1
+
+OR
+
+Control  Treatment1  Treatment2
+5.2      6.1         7.2
+5.4      6.3         7.0
+5.1      5.9         7.4`;
+    document.getElementById("universal-file-status").style.display = "none";
+    document.getElementById("universal-file-input").value = "";
+}
+
+async function runUniversalAnalysis() {
+    const rawText = document.getElementById("universal-data-text")?.value || "";
+    const testType = document.getElementById("universal-test-type")?.value || "";
+    const context = document.getElementById("universal-context")?.value || "";
+
+    // Check if we have data
+    if (!rawText.trim() && !universalFileData) {
+        showToast("Paste data or upload a file first", "error");
+        return;
+    }
+
+    closeModal("modal-universal-analyze");
+    switchTab("output");
+    appendOutput("command", "agent universal_analyze", ">>> Running 3-Layer Universal Analysis...\n    Layer 1: AI Adapter (extracting structure)\n    Layer 2: Python Math (ANOVA + Tukey)\n    Layer 3: AI Reporter (context-aware interpretation)");
+    setStatus("loading", "Universal Agent analyzing data...");
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 300000); // 5 minutes
+
+    try {
+        let resp;
+
+        if (universalFileData) {
+            // File upload mode
+            const formData = new FormData();
+            formData.append("file", universalFileData);
+            formData.append("proposal_context", context);
+            if (testType) formData.append("test_type", testType);
+
+            resp = await fetch("/api/agent/universal_analyze_file", {
+                method: "POST",
+                body: formData,
+                signal: controller.signal,
+            });
+        } else {
+            // Text paste mode
+            resp = await fetch("/api/agent/universal_analyze", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    raw_text: rawText,
+                    proposal_context: context,
+                    test_type: testType || null
+                }),
+                signal: controller.signal,
+            });
+        }
+
+        clearTimeout(timeoutId);
+        const data = await resp.json();
+
+        if (data.error || data.result?.error) {
+            const errorMsg = data.error || data.result.error;
+            let output = "=" .repeat(60) + "\n";
+            output += "  ANALYSIS ERROR\n";
+            output += "=" .repeat(60) + "\n\n";
+            output += `Error: ${errorMsg}\n`;
+            if (data.result?.layer) {
+                output += `Failed at: Layer ${data.result.layer}\n`;
+            }
+            if (data.result?.details) {
+                output += `Details: ${JSON.stringify(data.result.details)}\n`;
+            }
+            updateLastOutput("agent universal_analyze", output, "error");
+            setStatus("error", "Analysis failed");
+            return;
+        }
+
+        const result = data.result;
+        let output = "=" .repeat(60) + "\n";
+        output += "  UNIVERSAL STATISTICAL ANALYSIS RESULTS\n";
+        output += "=" .repeat(60) + "\n\n";
+
+        // Layer 1: Extraction
+        if (result.layer1_extraction) {
+            output += ">>> LAYER 1: AI ADAPTER (Structure Extraction)\n";
+            output += "-" .repeat(40) + "\n";
+            output += `  Groups found: ${result.layer1_extraction.groups_found.join(", ")}\n`;
+            output += "  Samples per group:\n";
+            Object.entries(result.layer1_extraction.samples_per_group).forEach(([g, n]) => {
+                output += `    ${g}: n=${n}\n`;
+            });
+            output += "\n";
+        }
+
+        // Layer 2: Statistics
+        if (result.layer2_statistics) {
+            const stats = result.layer2_statistics;
+
+            output += ">>> LAYER 2: PYTHON MATH ENGINE (Rigorous Statistics)\n";
+            output += "-" .repeat(40) + "\n\n";
+
+            // Descriptive stats
+            if (stats.descriptive) {
+                output += "  DESCRIPTIVE STATISTICS\n";
+                output += "  " + "-".repeat(50) + "\n";
+                output += "  Group".padEnd(20) + "N".padStart(6) + "Mean".padStart(10) + "SD".padStart(10) + "95% CI\n";
+                output += "  " + "-".repeat(50) + "\n";
+                Object.entries(stats.descriptive).forEach(([group, d]) => {
+                    output += `  ${group.padEnd(18)} ${String(d.n).padStart(6)} ${d.mean.toFixed(3).padStart(10)} ${d.std.toFixed(3).padStart(10)} [${d.ci_95_lower.toFixed(2)}, ${d.ci_95_upper.toFixed(2)}]\n`;
+                });
+                output += "\n";
+            }
+
+            // ANOVA
+            if (stats.anova) {
+                output += "  ONE-WAY ANOVA\n";
+                output += "  " + "-".repeat(35) + "\n";
+                output += `  F-statistic: ${stats.anova.F_statistic}\n`;
+                output += `  p-value: ${stats.anova.p_value}`;
+                if (stats.anova.significant) {
+                    output += " ***\n";
+                    output += `  Result: SIGNIFICANT (p < ${stats.anova.alpha})\n`;
+                } else {
+                    output += "\n";
+                    output += `  Result: Not significant (p >= ${stats.anova.alpha})\n`;
+                }
+                output += `  Groups: ${stats.anova.n_groups}, Total N: ${stats.anova.total_n}\n\n`;
+            }
+
+            // Post-hoc Tukey
+            if (stats.posthoc && stats.posthoc.comparisons) {
+                output += "  POST-HOC TUKEY HSD\n";
+                output += "  " + "-".repeat(55) + "\n";
+                output += "  Comparison".padEnd(30) + "Diff".padStart(10) + "p-adj".padStart(12) + "Sig\n";
+                output += "  " + "-".repeat(55) + "\n";
+                stats.posthoc.comparisons.forEach(c => {
+                    const comp = `${c.group1} vs ${c.group2}`;
+                    const sig = c.significant ? " ***" : "";
+                    output += `  ${comp.padEnd(28)} ${c.mean_diff.toFixed(3).padStart(10)} ${c.p_adj.toFixed(6).padStart(12)}${sig}\n`;
+                });
+                output += "\n";
+            }
+        }
+
+        // Layer 3: Interpretation
+        if (result.layer3_interpretation) {
+            output += ">>> LAYER 3: AI CONTEXT-AWARE REPORTER\n";
+            output += "-" .repeat(40) + "\n\n";
+
+            const interp = result.layer3_interpretation;
+            if (interp.test_type) {
+                output += `  Test Type: ${interp.test_type.detected_type || "Auto-detected"}\n`;
+                output += `  Interpretation Mode: ${interp.test_type.interpretation}\n\n`;
+            }
+
+            if (interp.report) {
+                output += "  ACADEMIC RESULTS PARAGRAPH:\n";
+                output += "  " + "=".repeat(45) + "\n\n";
+                // Word wrap the report
+                const words = interp.report.split(" ");
+                let line = "  ";
+                words.forEach(word => {
+                    if (line.length + word.length > 70) {
+                        output += line + "\n";
+                        line = "  " + word + " ";
+                    } else {
+                        line += word + " ";
+                    }
+                });
+                output += line + "\n";
+            }
+        }
+
+        output += "\n" + "=" .repeat(60) + "\n";
+        output += "  END OF UNIVERSAL ANALYSIS\n";
+        output += "=" .repeat(60);
+
+        updateLastOutput("agent universal_analyze", output);
+        setStatus("ok", "Universal analysis complete");
+        showToast("Universal analysis complete", "success");
+
+        // Clear the file data
+        universalFileData = null;
+
+    } catch (err) {
+        clearTimeout(timeoutId);
+        if (err.name === "AbortError") {
+            updateLastOutput("agent universal_analyze", "Error: Analysis timed out. Make sure Ollama is running.", "error");
+        } else {
+            updateLastOutput("agent universal_analyze", `Error: ${err.message}`, "error");
+        }
+        setStatus("error", "Analysis failed");
+    }
+}
+
+// ============================================================
 // AGENT: LITERATURE REVIEW
 // ============================================================
 async function runLiteratureReview() {
