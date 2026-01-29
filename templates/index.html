@@ -796,7 +796,7 @@ Or: '5.2 +/- 1.3 vs 7.8 +/- 1.5'"></textarea>
     </div>
 </div>
 
-<!-- Universal Statistical Analysis Agent (3-Layer Architecture) -->
+<!-- Universal Statistical Analysis Agent (3-Stage Pipeline) -->
 <div class="modal-overlay" id="modal-universal-analyze">
     <div class="modal" style="max-width:750px;">
         <div class="modal-header">
@@ -804,12 +804,18 @@ Or: '5.2 +/- 1.3 vs 7.8 +/- 1.5'"></textarea>
             <div class="modal-close" onclick="closeModal('modal-universal-analyze')">[x]</div>
         </div>
         <div class="modal-body">
-            <p style="font-size:11px;color:var(--text-muted);margin-bottom:12px;">
-                >>> 3-Layer Architecture for ANY Dental Research Data:<br>
-                <strong>Layer 1:</strong> AI extracts groups from ANY Excel layout<br>
-                <strong>Layer 2:</strong> Python runs ANOVA + Tukey (rigorous math)<br>
-                <strong>Layer 3:</strong> AI interprets results (context-aware)
-            </p>
+            <!-- 3-Stage Pipeline Description -->
+            <div class="pipeline-info" style="background:var(--bg-tertiary);padding:12px;border-radius:4px;margin-bottom:16px;border-left:3px solid var(--accent-cyan);">
+                <div style="font-size:12px;font-weight:bold;color:var(--accent-cyan);margin-bottom:8px;">3-STAGE PIPELINE ARCHITECTURE</div>
+                <div style="font-size:11px;color:var(--text-muted);line-height:1.6;">
+                    <strong style="color:var(--accent-yellow);">Stage 1:</strong> AI Data Organizer - Extracts clean JSON from ANY Excel layout<br>
+                    <strong style="color:var(--accent-green);">Stage 2:</strong> Python Calculator - ANOVA + Tukey + Power Analysis (no AI guessing)<br>
+                    <strong style="color:var(--accent-cyan);">Stage 3:</strong> AI Reporter - Context-aware interpretation of proven statistics
+                </div>
+                <div style="font-size:10px;color:var(--text-muted);margin-top:8px;font-style:italic;">
+                    "The AI organizes the mess. The Code calculates the truth. The AI explains the result."
+                </div>
+            </div>
 
             <!-- Drag & Drop Zone -->
             <div id="universal-drop-zone" class="drop-zone"
@@ -874,10 +880,37 @@ Control  Treatment1  Treatment2
                 <span id="universal-file-name"></span>
                 <button onclick="clearUniversalFile()" style="float:right;background:none;border:none;color:var(--text-muted);cursor:pointer;">[x]</button>
             </div>
+
+            <!-- Progress Stepper (hidden by default, shown during analysis) -->
+            <div id="universal-progress-stepper" style="display:none;margin-top:16px;padding:16px;background:var(--bg-tertiary);border-radius:4px;">
+                <div style="font-size:11px;color:var(--text-muted);margin-bottom:12px;text-align:center;">ANALYSIS PROGRESS</div>
+                <div style="display:flex;justify-content:space-between;align-items:center;">
+                    <!-- Stage 1 -->
+                    <div class="progress-stage" id="stage-1" style="flex:1;text-align:center;">
+                        <div class="stage-icon" id="stage-1-icon" style="font-size:20px;margin-bottom:4px;">[~]</div>
+                        <div class="stage-label" style="font-size:10px;">AI Organizer</div>
+                        <div class="stage-status" id="stage-1-status" style="font-size:9px;color:var(--text-muted);">Waiting</div>
+                    </div>
+                    <div style="flex:0.5;text-align:center;color:var(--text-muted);">→</div>
+                    <!-- Stage 2 -->
+                    <div class="progress-stage" id="stage-2" style="flex:1;text-align:center;">
+                        <div class="stage-icon" id="stage-2-icon" style="font-size:20px;margin-bottom:4px;">[%]</div>
+                        <div class="stage-label" style="font-size:10px;">Calculator</div>
+                        <div class="stage-status" id="stage-2-status" style="font-size:9px;color:var(--text-muted);">Waiting</div>
+                    </div>
+                    <div style="flex:0.5;text-align:center;color:var(--text-muted);">→</div>
+                    <!-- Stage 3 -->
+                    <div class="progress-stage" id="stage-3" style="flex:1;text-align:center;">
+                        <div class="stage-icon" id="stage-3-icon" style="font-size:20px;margin-bottom:4px;">[#]</div>
+                        <div class="stage-label" style="font-size:10px;">AI Reporter</div>
+                        <div class="stage-status" id="stage-3-status" style="font-size:9px;color:var(--text-muted);">Waiting</div>
+                    </div>
+                </div>
+            </div>
         </div>
         <div class="modal-footer">
             <button class="btn btn-secondary" onclick="closeModal('modal-universal-analyze')">[Cancel]</button>
-            <button class="btn btn-primary" onclick="runUniversalAnalysis()">[Analyze]</button>
+            <button class="btn btn-primary" id="universal-analyze-btn" onclick="runUniversalAnalysis()">[Analyze]</button>
         </div>
     </div>
 </div>

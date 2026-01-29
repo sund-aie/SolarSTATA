@@ -732,7 +732,11 @@ def run_agent_task(task_type: str, **kwargs) -> Dict:
 
 
 # ---------------------------------------------------------------------------
-# 3-LAYER UNIVERSAL STATISTICAL ANALYSIS AGENT
+# 3-STAGE PIPELINE: ORGANIZER -> CALCULATOR -> REPORTER
+# ---------------------------------------------------------------------------
+# Stage 1: AI organizes raw data into clean JSON
+# Stage 2: Python calculates statistics (ANOVA, Tukey, Power)
+# Stage 3: AI generates professional report
 # ---------------------------------------------------------------------------
 
 # Test type categorization for context-aware interpretation
@@ -752,39 +756,6 @@ TEST_TYPE_CATEGORIES = {
     ]
 }
 
-
-UNIVERSAL_ADAPTER_PROMPT = """You are a data extraction specialist. Your ONLY task is to analyze spreadsheet data and extract a standardized JSON structure.
-
-CRITICAL RULES:
-1. Identify ALL group names (e.g., "Control", "Group A", "Experimental", "Soy Milk", etc.)
-2. Extract ONLY the raw numerical values - these are individual measurements/observations
-3. Each group should have an array of individual measurements (typically 5-30 values per group)
-4. If the data has time points or conditions, ignore them for now - just group all values by their group name
-
-CRITICAL: IGNORE THESE ROWS COMPLETELY (they are summary statistics, NOT raw data):
-- Any row containing "Mean", "Average", "Avg", "M="
-- Any row containing "SD", "Std Dev", "StDev", "Standard Deviation", "S.D."
-- Any row containing "SEM", "SE", "Standard Error"
-- Any row containing "N=", "n=", "Count", "Total", "Sum"
-- Any row containing "Min", "Max", "Range", "Median"
-- Any row at the BOTTOM of a data column that looks like a calculated value
-
-OUTPUT FORMAT (JSON only, no other text):
-{
-    "Group_Name_1": [val1, val2, val3, ...],
-    "Group_Name_2": [val1, val2, val3, ...],
-    "Group_Name_3": [val1, val2, val3, ...]
-}
-
-EXAMPLES:
-- If you see "Control: 5.2, 5.4, 5.1" → {"Control": [5.2, 5.4, 5.1]}
-- If you see "A1 A2 A3" as headers with values below → {"A1": [...], "A2": [...], "A3": [...]}
-- If the last rows show "Mean: 5.3" and "SD: 0.2" → IGNORE these rows entirely
-- NEVER include calculated statistics, only raw individual data points
-
-Output ONLY valid JSON. No explanations."""
-
-
 # Summary row keywords to filter out (Python safety net)
 SUMMARY_ROW_KEYWORDS = [
     'mean', 'average', 'avg', 'm=',
@@ -795,164 +766,230 @@ SUMMARY_ROW_KEYWORDS = [
 ]
 
 
-def filter_summary_rows_from_text(raw_text: str) -> str:
+# ===========================================================================
+# STAGE 1: AI DATA ORGANIZER
+# ===========================================================================
+
+STAGE1_ORGANIZER_PROMPT = """You are a data extraction specialist. Your job is to convert messy spreadsheet data into a clean, standardized JSON format.
+
+CRITICAL INSTRUCTIONS:
+1. Find ALL raw observation data (individual measurements)
+2. Identify the GROUP each value belongs to (e.g., "Control", "Cow Milk", "Soy Milk", "Treatment A")
+3. If there are TIME POINTS or CONDITIONS, identify those too (e.g., "Baseline", "Day 7", "Day 14")
+4. Extract each individual numerical value
+
+ABSOLUTELY IGNORE (these are summary statistics, NOT raw data):
+- Rows labeled "Mean", "Average", "Avg"
+- Rows labeled "SD", "Std Dev", "StDev", "Standard Deviation"
+- Rows labeled "SEM", "SE", "Standard Error"
+- Rows labeled "N=", "n=", "Count", "Total", "Sum"
+- Rows labeled "Min", "Max", "Range", "Median"
+- Any calculated/aggregated values at the bottom of columns
+
+OUTPUT FORMAT - Array of observation objects (JSON only, no other text):
+[
+    {"group": "Control", "time_point": "Baseline", "value": 466.4},
+    {"group": "Control", "time_point": "Baseline", "value": 472.1},
+    {"group": "Cow Milk", "time_point": "Day 7", "value": 389.2},
+    ...
+]
+
+If there are NO time points, use "All" as the time_point value.
+
+Output ONLY valid JSON array. No explanations, no markdown, just the JSON."""
+
+
+def stage1_ai_organizer(raw_text: str, progress_callback=None) -> Dict:
     """
-    Pre-filter: Remove lines that contain summary statistics keywords.
-    This runs BEFORE sending to AI as an extra safety measure.
+    STAGE 1: AI DATA ORGANIZER
+
+    Takes raw spreadsheet text dump and uses AI to extract clean JSON.
+    Output format: [{"group": "X", "time_point": "Y", "value": Z}, ...]
     """
+    if progress_callback:
+        progress_callback("stage1", "AI Organizing Data...")
+
+    # Pre-filter obvious summary rows
+    filtered_text = _filter_summary_rows(raw_text)
+
+    prompt = f"""Analyze this raw spreadsheet data and extract all individual observations.
+
+RAW DATA:
+{filtered_text}
+
+Extract every raw numerical value with its group and time point.
+Output as JSON array: [{{"group": "X", "time_point": "Y", "value": Z}}, ...]
+If no time points exist, use "All" as the time_point."""
+
+    result = call_agent(prompt, STAGE1_ORGANIZER_PROMPT, timeout=90)
+
+    if not result["success"]:
+        return {"error": f"AI Organizer failed: {result.get('error', 'Unknown error')}", "stage": 1}
+
+    # Parse JSON from response
+    response = result["response"]
+    try:
+        # Extract JSON array from response
+        json_match = re.search(r'\[[\s\S]*\]', response)
+        if json_match:
+            observations = json.loads(json_match.group())
+
+            # Validate structure
+            if not isinstance(observations, list):
+                return {"error": "AI returned invalid format (expected array)", "stage": 1}
+
+            if len(observations) == 0:
+                return {"error": "AI found no data. Check if your file has raw observations.", "stage": 1}
+
+            # Clean and validate each observation
+            clean_observations = []
+            for obs in observations:
+                if not isinstance(obs, dict):
+                    continue
+
+                group = str(obs.get("group", "")).strip()
+                time_point = str(obs.get("time_point", "All")).strip()
+                value = obs.get("value")
+
+                # Skip if group looks like a summary keyword
+                if _is_summary_keyword(group):
+                    continue
+
+                # Skip if no valid value
+                if value is None:
+                    continue
+
+                try:
+                    value = float(value)
+                    if not np.isnan(value) and not np.isinf(value):
+                        clean_observations.append({
+                            "group": group if group else "Unknown",
+                            "time_point": time_point if time_point else "All",
+                            "value": value
+                        })
+                except (ValueError, TypeError):
+                    continue
+
+            if len(clean_observations) < 3:
+                return {
+                    "error": "Error: No raw data found. Only found {} values. Please check your Excel sheet has actual observations, not just summary statistics.".format(len(clean_observations)),
+                    "stage": 1
+                }
+
+            # Summary of what was found
+            groups_found = list(set(o["group"] for o in clean_observations))
+            timepoints_found = list(set(o["time_point"] for o in clean_observations))
+
+            return {
+                "success": True,
+                "observations": clean_observations,
+                "summary": {
+                    "total_observations": len(clean_observations),
+                    "groups": groups_found,
+                    "time_points": timepoints_found,
+                    "n_groups": len(groups_found),
+                    "n_timepoints": len(timepoints_found)
+                }
+            }
+        else:
+            return {"error": "AI could not parse data structure", "stage": 1, "raw_response": response}
+
+    except json.JSONDecodeError as e:
+        return {"error": f"JSON parsing failed: {e}", "stage": 1, "raw_response": response}
+
+
+def _filter_summary_rows(raw_text: str) -> str:
+    """Pre-filter lines that contain summary statistics keywords."""
     lines = raw_text.split('\n')
     filtered_lines = []
 
     for line in lines:
         line_lower = line.lower().strip()
-        # Skip empty lines
         if not line_lower:
             filtered_lines.append(line)
             continue
-        # Check if line starts with or contains summary keywords
+
         is_summary = False
         for keyword in SUMMARY_ROW_KEYWORDS:
             if line_lower.startswith(keyword) or f'\t{keyword}' in line_lower or f' {keyword}' in line_lower:
                 is_summary = True
                 break
+
         if not is_summary:
             filtered_lines.append(line)
 
     return '\n'.join(filtered_lines)
 
 
-def filter_summary_groups(group_data: Dict) -> Dict:
+def _is_summary_keyword(text: str) -> bool:
+    """Check if text matches a summary keyword."""
+    text_lower = text.lower().strip()
+    for keyword in SUMMARY_ROW_KEYWORDS:
+        if keyword in text_lower:
+            return True
+    return False
+
+
+# ===========================================================================
+# STAGE 2: PYTHON CALCULATION ENGINE (THE AUTOMATIC SYSTEM)
+# ===========================================================================
+
+def stage2_calculator(observations: List[Dict], alpha: float = 0.05,
+                      progress_callback=None) -> Dict:
     """
-    Post-AI filter: Remove any groups that look like summary statistics.
-    Protects against AI misinterpreting Mean/SD rows as group names.
+    STAGE 2: PYTHON CALCULATION ENGINE
+
+    Pure Python statistics - NO AI guessing allowed.
+    - Validation: N >= 3 per group
+    - One-Way ANOVA
+    - Tukey HSD (if significant)
+    - Power Analysis
+    - Descriptive Statistics
     """
-    filtered = {}
-    for group_name, values in group_data.items():
-        group_lower = str(group_name).lower().strip()
-        # Skip groups named like summaries
-        is_summary_group = False
-        for keyword in SUMMARY_ROW_KEYWORDS:
-            if keyword in group_lower:
-                is_summary_group = True
-                break
-        if is_summary_group:
-            continue
-        # Keep only valid numeric values
-        if isinstance(values, list) and len(values) > 0:
-            filtered[group_name] = values
+    if progress_callback:
+        progress_callback("stage2", "Running Statistical Engine...")
 
-    return filtered
+    # Convert observations to DataFrame
+    df = pd.DataFrame(observations)
 
+    # Get unique groups and time points
+    groups = df["group"].unique().tolist()
+    time_points = df["time_point"].unique().tolist()
 
-def layer1_universal_adapter(raw_data_text: str) -> Dict:
-    """
-    LAYER 1: Universal Adapter
-    Takes ANY Excel/CSV text layout and outputs standardized JSON.
-    Format: {"Group_A": [val1, val2...], "Group_B": [val1, val2...]}
-
-    Includes pre-filtering to remove summary rows (Mean, SD, etc.)
-    """
-    # Pre-filter: Remove lines that look like summary statistics
-    filtered_text = filter_summary_rows_from_text(raw_data_text)
-
-    prompt = f"""Analyze this spreadsheet data and extract the group structure:
-
-{filtered_text}
-
-Extract ALL groups and their raw numerical values.
-IMPORTANT: Ignore any rows containing Mean, SD, Average, or other summary statistics.
-Output as JSON: {{"Group1": [values], "Group2": [values], ...}}"""
-
-    result = call_agent(prompt, UNIVERSAL_ADAPTER_PROMPT, timeout=60)
-
-    if not result["success"]:
-        return {"error": result.get("error", "AI adapter failed")}
-
-    response = result["response"]
-
-    # Extract JSON from response
-    try:
-        # Look for JSON object in response
-        json_match = re.search(r'\{[\s\S]*\}', response)
-        if json_match:
-            structured = json.loads(json_match.group())
-
-            # Validate structure: must have at least 2 groups
-            if not isinstance(structured, dict):
-                return {"error": "Invalid format: expected dictionary of groups"}
-
-            if len(structured) < 2:
-                return {"error": f"Need at least 2 groups for comparison, found {len(structured)}"}
-
-            # Clean and validate each group
-            clean_data = {}
-            for group_name, values in structured.items():
-                if not isinstance(values, list):
-                    continue
-                # Convert to floats, filter out non-numeric
-                clean_values = []
-                for v in values:
-                    try:
-                        if v is not None and str(v).strip() not in ['', 'nan', 'NaN', 'null']:
-                            clean_values.append(float(v))
-                    except (ValueError, TypeError):
-                        continue
-                if clean_values:
-                    clean_data[str(group_name)] = clean_values
-
-            # Post-filter: Remove any groups that look like summary statistics
-            clean_data = filter_summary_groups(clean_data)
-
-            if len(clean_data) < 2:
-                return {"error": f"Not enough valid groups with data. Found: {list(clean_data.keys())}"}
-
-            return {"success": True, "data": clean_data, "n_groups": len(clean_data)}
-        else:
-            return {"error": "Could not parse JSON from AI response", "raw": response}
-    except json.JSONDecodeError as e:
-        return {"error": f"JSON parsing error: {e}", "raw": response}
-
-
-def layer2_rigorous_math(group_data: Dict, alpha: float = 0.05) -> Dict:
-    """
-    LAYER 2: Rigorous Math Engine (Python Only)
-    Receives clean JSON, validates, runs ANOVA + Tukey HSD.
-
-    NEVER lets AI guess numbers - all calculations done in Python.
-    """
-    # Validation: Check n > 2 per group
+    # =========== VALIDATION ===========
     validation_errors = []
-    valid_groups = {}
 
-    for group_name, values in group_data.items():
-        n = len(values)
-        if n < 3:
+    # Check N per group (must be >= 3)
+    group_counts = df.groupby("group").size()
+    for group, count in group_counts.items():
+        if count < 3:
             validation_errors.append(
-                f"Data Read Error: '{group_name}' has only {n} samples. "
-                "Ensure summary rows (Mean/SD) are excluded and raw data is read."
+                f"'{group}': N={count} (minimum 3 required)"
             )
-        else:
-            valid_groups[group_name] = values
 
-    if len(valid_groups) < 2:
+    if validation_errors:
         return {
-            "error": "Data Not Found: Insufficient data for analysis",
+            "error": "Error: No raw data found. Please check your Excel sheet.",
             "details": validation_errors,
-            "requirement": "Each group must have n > 2 observations. "
-                          "If you see n=1 or n=2, the system may have read summary rows "
-                          "(Mean, SD) instead of raw data. Please check your data format."
+            "hint": "Found only {} observations per group. Ensure summary rows (Mean/SD) are excluded.".format(
+                ", ".join([f"{g}={c}" for g, c in group_counts.items()])
+            ),
+            "stage": 2
         }
 
-    # Prepare data arrays
-    group_names = list(valid_groups.keys())
-    group_arrays = [np.array(valid_groups[g]) for g in group_names]
+    if len(groups) < 2:
+        return {
+            "error": f"Need at least 2 groups for comparison, found only: {groups}",
+            "stage": 2
+        }
 
-    # Descriptive Statistics
+    # =========== DESCRIPTIVE STATISTICS ===========
     descriptive = {}
-    for name, arr in zip(group_names, group_arrays):
-        n = len(arr)
-        mean = float(np.mean(arr))
-        std = float(np.std(arr, ddof=1))
+    for group in groups:
+        group_data = df[df["group"] == group]["value"]
+        n = len(group_data)
+        mean = float(group_data.mean())
+        std = float(group_data.std(ddof=1))
         sem = std / np.sqrt(n)
 
         # 95% Confidence Interval
@@ -961,19 +998,21 @@ def layer2_rigorous_math(group_data: Dict, alpha: float = 0.05) -> Dict:
         ci_lower = mean - t_crit * sem
         ci_upper = mean + t_crit * sem
 
-        descriptive[name] = {
+        descriptive[group] = {
             "n": n,
             "mean": round(mean, 4),
             "std": round(std, 4),
             "sem": round(sem, 4),
-            "ci_95_lower": round(ci_lower, 4),
-            "ci_95_upper": round(ci_upper, 4)
+            "ci_95": [round(ci_lower, 4), round(ci_upper, 4)],
+            "min": round(float(group_data.min()), 4),
+            "max": round(float(group_data.max()), 4)
         }
 
-    # One-Way ANOVA
+    # =========== ONE-WAY ANOVA ===========
+    group_arrays = [df[df["group"] == g]["value"].values for g in groups]
     f_stat, p_value = sp_stats.f_oneway(*group_arrays)
 
-    # Handle NaN values
+    # Handle NaN
     if np.isnan(f_stat):
         f_stat = None
     else:
@@ -987,30 +1026,26 @@ def layer2_rigorous_math(group_data: Dict, alpha: float = 0.05) -> Dict:
         significant = p_value < alpha
 
     anova_result = {
+        "test": "One-Way ANOVA",
         "F_statistic": f_stat,
         "p_value": p_value,
         "alpha": alpha,
         "significant": significant,
-        "n_groups": len(group_names),
-        "total_n": sum(len(arr) for arr in group_arrays)
+        "conclusion": "Significant difference between groups" if significant else "No significant difference between groups"
     }
 
-    # Post-hoc Tukey HSD (only if ANOVA is significant)
+    # =========== POST-HOC TUKEY HSD ===========
     posthoc_result = None
-    if significant and len(group_names) >= 2:
-        all_values = []
-        all_labels = []
-        for name, arr in zip(group_names, group_arrays):
-            all_values.extend(arr.tolist())
-            all_labels.extend([name] * len(arr))
-
+    if significant and len(groups) >= 2:
         try:
+            all_values = df["value"].tolist()
+            all_labels = df["group"].tolist()
+
             tukey = pairwise_tukeyhsd(all_values, all_labels, alpha=alpha)
             comparisons = []
 
-            # Parse Tukey results
             for row in tukey.summary().data[1:]:
-                comparison = {
+                comparisons.append({
                     "group1": str(row[0]),
                     "group2": str(row[1]),
                     "mean_diff": round(float(row[2]), 4),
@@ -1018,194 +1053,302 @@ def layer2_rigorous_math(group_data: Dict, alpha: float = 0.05) -> Dict:
                     "ci_lower": round(float(row[4]), 4),
                     "ci_upper": round(float(row[5]), 4),
                     "significant": bool(row[6]) if isinstance(row[6], bool) else str(row[6]) == "True"
-                }
-                comparisons.append(comparison)
+                })
 
             posthoc_result = {
-                "method": "Tukey HSD",
+                "test": "Tukey HSD",
                 "comparisons": comparisons
             }
         except Exception as e:
             posthoc_result = {"error": f"Tukey HSD failed: {str(e)}"}
 
+    # =========== POWER ANALYSIS ===========
+    power_result = None
+    try:
+        # Calculate effect size (Cohen's f)
+        grand_mean = df["value"].mean()
+        between_var = sum(
+            descriptive[g]["n"] * (descriptive[g]["mean"] - grand_mean) ** 2
+            for g in groups
+        ) / (len(groups) - 1)
+
+        within_var = df.groupby("group")["value"].var(ddof=1).mean()
+
+        if within_var > 0:
+            cohens_f = np.sqrt(between_var / within_var)
+            cohens_f = round(float(cohens_f), 4)
+
+            # Interpret effect size
+            if cohens_f < 0.1:
+                effect_interpretation = "negligible"
+            elif cohens_f < 0.25:
+                effect_interpretation = "small"
+            elif cohens_f < 0.4:
+                effect_interpretation = "medium"
+            else:
+                effect_interpretation = "large"
+
+            # Calculate observed power (simplified)
+            avg_n = int(df.groupby("group").size().mean())
+            total_n = len(df)
+
+            # Power calculation using noncentrality parameter
+            from scipy.stats import f as f_dist
+            df_between = len(groups) - 1
+            df_within = total_n - len(groups)
+            ncp = cohens_f ** 2 * total_n  # Noncentrality parameter
+
+            f_crit = f_dist.ppf(1 - alpha, df_between, df_within)
+            observed_power = 1 - f_dist.cdf(f_crit, df_between, df_within, ncp)
+            observed_power = round(float(observed_power), 4)
+
+            # Recommend sample size for 80% power
+            target_power = 0.80
+            if observed_power < target_power and cohens_f > 0:
+                # Approximate required N per group
+                from scipy.stats import norm
+                z_alpha = norm.ppf(1 - alpha/2)
+                z_beta = norm.ppf(target_power)
+                recommended_n = int(np.ceil(2 * ((z_alpha + z_beta) ** 2) / (cohens_f ** 2)))
+            else:
+                recommended_n = avg_n
+
+            power_result = {
+                "effect_size_f": cohens_f,
+                "effect_interpretation": effect_interpretation,
+                "observed_power": observed_power,
+                "current_n_per_group": avg_n,
+                "recommended_n_per_group": recommended_n,
+                "adequate_power": observed_power >= 0.80,
+                "power_note": "Power >= 0.80 is generally considered adequate" if observed_power >= 0.80
+                             else f"Consider increasing to N={recommended_n} per group for 80% power"
+            }
+    except Exception as e:
+        power_result = {"error": f"Power analysis failed: {str(e)}"}
+
+    # =========== BUILD RESULT ===========
     return {
         "success": True,
+        "summary": {
+            "total_observations": len(df),
+            "n_groups": len(groups),
+            "groups": groups,
+            "time_points": time_points
+        },
         "descriptive": descriptive,
         "anova": anova_result,
         "posthoc": posthoc_result,
-        "groups_analyzed": group_names
+        "power_analysis": power_result
     }
 
 
-def detect_test_type(raw_text: str, proposal_context: str = "") -> Dict:
-    """
-    Detect the test type from Excel headers or proposal context.
-    Returns whether higher or lower values are "better".
-    """
-    combined_text = (raw_text + " " + proposal_context).lower()
+# ===========================================================================
+# STAGE 3: AI REPORTER
+# ===========================================================================
 
-    # Check for higher = better indicators
-    for keyword in TEST_TYPE_CATEGORIES["higher_better"]:
-        if keyword in combined_text:
-            return {
-                "category": "higher_better",
-                "detected_type": keyword,
-                "interpretation": "Higher values indicate better performance"
-            }
+STAGE3_REPORTER_PROMPT = """You are a dental research statistician writing results for an academic paper.
 
-    # Check for lower = better indicators
-    for keyword in TEST_TYPE_CATEGORIES["lower_better"]:
-        if keyword in combined_text:
-            return {
-                "category": "lower_better",
-                "detected_type": keyword,
-                "interpretation": "Lower values indicate better performance"
-            }
-
-    # Default: assume higher is better
-    return {
-        "category": "unknown",
-        "detected_type": None,
-        "interpretation": "Unable to detect test type - defaulting to higher = better"
-    }
-
-
-CONTEXT_AWARE_REPORTER_PROMPT = """You are a dental research statistician writing results for an academic paper.
-
-CRITICAL INSTRUCTIONS:
-1. Use the EXACT statistics provided - never modify or recalculate numbers
-2. Report p-values and F-statistics exactly as given
-3. For significant results (p < 0.05), clearly state which groups differ
-4. Apply the CORRECT interpretation based on test type:
+STRICT RULES:
+1. Use ONLY the exact statistics provided - NEVER invent or modify numbers
+2. Report p-values, F-statistics, means, and SDs exactly as given
+3. Clearly state which comparisons are significant (p < 0.05)
+4. Apply the correct interpretation based on the test type
 
 {test_type_instruction}
 
-Write a professional academic paragraph suitable for the Results section of a dental research paper.
-Be specific: state exact p-values, mean differences, and which comparisons are significant.
-
+Write a professional academic paragraph suitable for the Results section.
+Be specific: state exact p-values, mean differences, and group comparisons.
 Do NOT include methodology - only results interpretation."""
 
 
-def layer3_context_reporter(stats_results: Dict, test_type_info: Dict,
-                            raw_text: str = "", proposal_context: str = "") -> str:
+def stage3_ai_reporter(stats_results: Dict, proposal_context: str = "",
+                       test_type_hint: str = None, progress_callback=None) -> str:
     """
-    LAYER 3: Context-Aware Reporter
-    AI interprets results with awareness of test type (higher vs lower = better).
+    STAGE 3: AI REPORTER
+
+    Takes proven statistics and generates professional report.
+    Uses context to determine correct interpretation (higher/lower = better).
     """
+    if progress_callback:
+        progress_callback("stage3", "Generating Report...")
+
+    # Detect test type for interpretation
+    test_type_info = _detect_test_type(proposal_context, test_type_hint)
     category = test_type_info.get("category", "unknown")
     detected = test_type_info.get("detected_type", "unknown test")
 
     if category == "higher_better":
         test_instruction = f"""TEST TYPE: {detected} (HIGHER values = BETTER)
-- The group with the HIGHEST mean has the best performance
+- The group with HIGHEST mean has the best performance
 - Significant increases indicate improvement
-- Example: "Group A showed significantly higher hardness (p<0.05), indicating superior mechanical properties" """
+- Example: "Group A showed significantly higher microhardness (p<0.05), indicating superior mechanical properties" """
     elif category == "lower_better":
         test_instruction = f"""TEST TYPE: {detected} (LOWER values = BETTER)
-- The group with the LOWEST mean has the best performance
+- The group with LOWEST mean has the best performance
 - Significant decreases indicate improvement
-- Example: "Group A showed significantly lower absorbance (p<0.05), indicating superior anti-biofilm properties" """
+- Example: "Group A showed significantly lower absorbance (p<0.05), indicating superior anti-biofilm activity" """
     else:
         test_instruction = """TEST TYPE: Unknown - Interpret neutrally
 - Report significant differences without implying which is "better"
 - Example: "Group A showed significantly different values compared to Control (p<0.05)" """
 
-    system_prompt = CONTEXT_AWARE_REPORTER_PROMPT.format(test_type_instruction=test_instruction)
+    system_prompt = STAGE3_REPORTER_PROMPT.format(test_type_instruction=test_instruction)
 
-    # Build the prompt with statistics
-    stats_summary = json.dumps(stats_results, indent=2)
+    # Build statistics summary for AI
+    stats_text = f"""
+STATISTICAL RESULTS (use these exact numbers):
 
-    prompt = f"""Write an academic results paragraph for this dental research study.
+ANOVA: F = {stats_results['anova']['F_statistic']}, p = {stats_results['anova']['p_value']}
+Result: {'SIGNIFICANT' if stats_results['anova']['significant'] else 'Not significant'}
 
-STATISTICAL RESULTS:
-{stats_summary}
+DESCRIPTIVE STATISTICS:
+"""
+    for group, stats in stats_results['descriptive'].items():
+        stats_text += f"  {group}: Mean = {stats['mean']}, SD = {stats['std']}, N = {stats['n']}\n"
 
-CONTEXT FROM DATA/PROPOSAL:
-{proposal_context if proposal_context else "No additional context provided"}
+    if stats_results.get('posthoc') and stats_results['posthoc'].get('comparisons'):
+        stats_text += "\nPOST-HOC COMPARISONS (Tukey HSD):\n"
+        for comp in stats_results['posthoc']['comparisons']:
+            sig = "***" if comp['significant'] else ""
+            stats_text += f"  {comp['group1']} vs {comp['group2']}: diff = {comp['mean_diff']}, p = {comp['p_adj']} {sig}\n"
 
-Use the exact statistics above. Apply the correct interpretation (higher/lower = better) based on the test type."""
+    if stats_results.get('power_analysis') and not stats_results['power_analysis'].get('error'):
+        pa = stats_results['power_analysis']
+        stats_text += f"\nPOWER ANALYSIS: Observed power = {pa['observed_power']} ({pa['effect_interpretation']} effect)\n"
+
+    prompt = f"""Write a professional academic results paragraph.
+
+{stats_text}
+
+RESEARCH CONTEXT:
+{proposal_context if proposal_context else "Dental materials research study comparing groups."}
+
+Generate a clear, professional interpretation using the exact statistics above."""
 
     result = call_agent(prompt, system_prompt, timeout=90)
 
     if result["success"]:
         return result["response"]
     else:
-        return f"[Interpretation unavailable: {result.get('error', 'Unknown error')}]"
+        return f"[Report generation failed: {result.get('error', 'Unknown error')}]"
 
+
+def _detect_test_type(context: str, hint: str = None) -> Dict:
+    """Detect test type from context for correct interpretation."""
+    if hint:
+        if hint.lower() in ["higher", "higher_better", "strength", "hardness"]:
+            return {"category": "higher_better", "detected_type": hint}
+        elif hint.lower() in ["lower", "lower_better", "biofilm", "roughness"]:
+            return {"category": "lower_better", "detected_type": hint}
+
+    context_lower = context.lower()
+
+    for keyword in TEST_TYPE_CATEGORIES["higher_better"]:
+        if keyword in context_lower:
+            return {"category": "higher_better", "detected_type": keyword}
+
+    for keyword in TEST_TYPE_CATEGORIES["lower_better"]:
+        if keyword in context_lower:
+            return {"category": "lower_better", "detected_type": keyword}
+
+    return {"category": "unknown", "detected_type": None}
+
+
+# ===========================================================================
+# MAIN PIPELINE: RUN ALL 3 STAGES
+# ===========================================================================
+
+def run_3stage_pipeline(raw_text: str, proposal_context: str = "",
+                        test_type_hint: str = None, alpha: float = 0.05,
+                        progress_callback=None) -> Dict:
+    """
+    COMPLETE 3-STAGE PIPELINE
+
+    Stage 1: AI organizes raw data into clean JSON
+    Stage 2: Python calculates statistics (no AI guessing)
+    Stage 3: AI generates professional report
+
+    Returns detailed results from each stage.
+    """
+    pipeline_result = {
+        "stage1": None,
+        "stage2": None,
+        "stage3": None,
+        "success": False
+    }
+
+    # ===== STAGE 1: AI DATA ORGANIZER =====
+    stage1_result = stage1_ai_organizer(raw_text, progress_callback)
+    pipeline_result["stage1"] = stage1_result
+
+    if "error" in stage1_result:
+        pipeline_result["error"] = stage1_result["error"]
+        pipeline_result["failed_stage"] = 1
+        return pipeline_result
+
+    # ===== STAGE 2: PYTHON CALCULATOR =====
+    stage2_result = stage2_calculator(
+        stage1_result["observations"],
+        alpha=alpha,
+        progress_callback=progress_callback
+    )
+    pipeline_result["stage2"] = stage2_result
+
+    if "error" in stage2_result:
+        pipeline_result["error"] = stage2_result["error"]
+        pipeline_result["failed_stage"] = 2
+        return pipeline_result
+
+    # ===== STAGE 3: AI REPORTER =====
+    report = stage3_ai_reporter(
+        stage2_result,
+        proposal_context=proposal_context,
+        test_type_hint=test_type_hint,
+        progress_callback=progress_callback
+    )
+    pipeline_result["stage3"] = {
+        "report": report,
+        "test_type": _detect_test_type(proposal_context, test_type_hint)
+    }
+
+    if progress_callback:
+        progress_callback("complete", "Analysis Complete")
+
+    pipeline_result["success"] = True
+    return pipeline_result
+
+
+# ===========================================================================
+# LEGACY COMPATIBILITY: Keep old function names working
+# ===========================================================================
 
 def run_universal_analysis(raw_text: str, proposal_context: str = "",
                            test_type_hint: str = None) -> Dict:
-    """
-    FULL 3-LAYER UNIVERSAL ANALYSIS PIPELINE
+    """Legacy wrapper - redirects to 3-stage pipeline."""
+    result = run_3stage_pipeline(raw_text, proposal_context, test_type_hint)
 
-    Layer 1: AI extracts standardized JSON from ANY Excel layout
-    Layer 2: Python runs rigorous ANOVA + Tukey HSD
-    Layer 3: AI generates context-aware interpretation
-    """
-    # Layer 1: Universal Adapter
-    adapter_result = layer1_universal_adapter(raw_text)
-    if "error" in adapter_result:
+    # Convert to old format for compatibility
+    if result["success"]:
         return {
-            "error": adapter_result["error"],
-            "layer": "1_adapter",
-            "details": adapter_result.get("details", adapter_result.get("raw", ""))
-        }
-
-    group_data = adapter_result["data"]
-
-    # Layer 2: Rigorous Math Engine
-    math_result = layer2_rigorous_math(group_data)
-    if "error" in math_result:
-        return {
-            "error": math_result["error"],
-            "layer": "2_math",
-            "details": math_result.get("details", []),
-            "extracted_groups": list(group_data.keys())
-        }
-
-    # Detect test type for context-aware interpretation
-    if test_type_hint:
-        # Manual override
-        if test_type_hint.lower() in ["higher", "higher_better", "strength", "hardness"]:
-            test_type_info = {
-                "category": "higher_better",
-                "detected_type": test_type_hint,
-                "interpretation": "Higher values indicate better performance (user specified)"
+            "success": True,
+            "layer1_extraction": {
+                "groups_found": result["stage1"]["summary"]["groups"],
+                "n_groups": result["stage1"]["summary"]["n_groups"],
+                "samples_per_group": {
+                    g: len([o for o in result["stage1"]["observations"] if o["group"] == g])
+                    for g in result["stage1"]["summary"]["groups"]
+                }
+            },
+            "layer2_statistics": {
+                "descriptive": result["stage2"]["descriptive"],
+                "anova": result["stage2"]["anova"],
+                "posthoc": result["stage2"]["posthoc"],
+                "power_analysis": result["stage2"]["power_analysis"]
+            },
+            "layer3_interpretation": {
+                "test_type": result["stage3"]["test_type"],
+                "report": result["stage3"]["report"]
             }
-        elif test_type_hint.lower() in ["lower", "lower_better", "biofilm", "roughness"]:
-            test_type_info = {
-                "category": "lower_better",
-                "detected_type": test_type_hint,
-                "interpretation": "Lower values indicate better performance (user specified)"
-            }
-        else:
-            test_type_info = detect_test_type(raw_text, proposal_context)
+        }
     else:
-        test_type_info = detect_test_type(raw_text, proposal_context)
-
-    # Layer 3: Context-Aware Reporter
-    interpretation = layer3_context_reporter(
-        math_result,
-        test_type_info,
-        raw_text,
-        proposal_context
-    )
-
-    # Build comprehensive result
-    return {
-        "success": True,
-        "layer1_extraction": {
-            "groups_found": list(group_data.keys()),
-            "n_groups": len(group_data),
-            "samples_per_group": {k: len(v) for k, v in group_data.items()}
-        },
-        "layer2_statistics": {
-            "descriptive": math_result["descriptive"],
-            "anova": math_result["anova"],
-            "posthoc": math_result["posthoc"]
-        },
-        "layer3_interpretation": {
-            "test_type": test_type_info,
-            "report": interpretation
-        }
-    }
+        return result
