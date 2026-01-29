@@ -1450,10 +1450,93 @@ async function runDualSampleSize() {
 }
 
 // ============================================================
-// UNIVERSAL STATISTICAL ANALYSIS AGENT (3-LAYER)
+// UNIVERSAL STATISTICAL ANALYSIS AGENT (3-STAGE PIPELINE)
 // ============================================================
 
 let universalFileData = null;
+
+// Progress stepper helper functions
+function showProgressStepper() {
+    const stepper = document.getElementById("universal-progress-stepper");
+    if (stepper) {
+        stepper.style.display = "block";
+        // Reset all stages to waiting
+        resetProgressStage(1);
+        resetProgressStage(2);
+        resetProgressStage(3);
+    }
+}
+
+function hideProgressStepper() {
+    const stepper = document.getElementById("universal-progress-stepper");
+    if (stepper) {
+        stepper.style.display = "none";
+    }
+}
+
+function resetProgressStage(stageNum) {
+    const stage = document.getElementById(`stage-${stageNum}`);
+    const icon = document.getElementById(`stage-${stageNum}-icon`);
+    const status = document.getElementById(`stage-${stageNum}-status`);
+    if (stage) {
+        stage.className = "progress-stage waiting";
+    }
+    if (icon) {
+        if (stageNum === 1) icon.textContent = "[~]";
+        else if (stageNum === 2) icon.textContent = "[%]";
+        else if (stageNum === 3) icon.textContent = "[#]";
+    }
+    if (status) {
+        status.textContent = "Waiting";
+    }
+}
+
+function setStageActive(stageNum, statusText) {
+    const stage = document.getElementById(`stage-${stageNum}`);
+    const icon = document.getElementById(`stage-${stageNum}-icon`);
+    const status = document.getElementById(`stage-${stageNum}-status`);
+    if (stage) {
+        stage.className = "progress-stage active";
+    }
+    if (icon) {
+        if (stageNum === 1) icon.textContent = "[*]";
+        else if (stageNum === 2) icon.textContent = "[*]";
+        else if (stageNum === 3) icon.textContent = "[*]";
+    }
+    if (status && statusText) {
+        status.textContent = statusText;
+    }
+}
+
+function setStageComplete(stageNum, statusText) {
+    const stage = document.getElementById(`stage-${stageNum}`);
+    const icon = document.getElementById(`stage-${stageNum}-icon`);
+    const status = document.getElementById(`stage-${stageNum}-status`);
+    if (stage) {
+        stage.className = "progress-stage complete";
+    }
+    if (icon) {
+        icon.textContent = "[OK]";
+    }
+    if (status && statusText) {
+        status.textContent = statusText;
+    }
+}
+
+function setStageError(stageNum, statusText) {
+    const stage = document.getElementById(`stage-${stageNum}`);
+    const icon = document.getElementById(`stage-${stageNum}-icon`);
+    const status = document.getElementById(`stage-${stageNum}-status`);
+    if (stage) {
+        stage.className = "progress-stage error";
+    }
+    if (icon) {
+        icon.textContent = "[X]";
+    }
+    if (status && statusText) {
+        status.textContent = statusText;
+    }
+}
 
 function handleDragOver(e) {
     e.preventDefault();
@@ -1561,13 +1644,23 @@ async function runUniversalAnalysis() {
         return;
     }
 
-    closeModal("modal-universal-analyze");
+    // Show progress stepper in modal
+    showProgressStepper();
+    setStageActive(1, "Starting...");
+
+    // Disable analyze button
+    const analyzeBtn = document.getElementById("universal-analyze-btn");
+    if (analyzeBtn) analyzeBtn.disabled = true;
+
     switchTab("output");
-    appendOutput("command", "agent universal_analyze", ">>> Running 3-Layer Universal Analysis...\n    Layer 1: AI Adapter (extracting structure)\n    Layer 2: Python Math (ANOVA + Tukey)\n    Layer 3: AI Reporter (context-aware interpretation)");
-    setStatus("loading", "Universal Agent analyzing data...");
+    appendOutput("command", "agent universal_analyze", ">>> Running 3-Stage Pipeline Analysis...\n    Stage 1: AI Data Organizer\n    Stage 2: Python Calculator (ANOVA + Tukey + Power)\n    Stage 3: AI Reporter");
+    setStatus("loading", "Stage 1: AI organizing data...");
 
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 300000); // 5 minutes
+
+    // Simulate stage progress (actual progress comes from server)
+    setStageActive(1, "Organizing...");
 
     try {
         let resp;
@@ -1603,29 +1696,51 @@ async function runUniversalAnalysis() {
 
         if (data.error || data.result?.error) {
             const errorMsg = data.error || data.result.error;
+            const failedStage = data.result?.failed_stage || data.result?.layer || 1;
+
+            // Update progress stepper to show error
+            for (let i = 1; i < failedStage; i++) {
+                setStageComplete(i, "Done");
+            }
+            setStageError(failedStage, "Failed");
+
             let output = "=" .repeat(60) + "\n";
             output += "  ANALYSIS ERROR\n";
             output += "=" .repeat(60) + "\n\n";
             output += `Error: ${errorMsg}\n`;
-            if (data.result?.layer) {
-                output += `Failed at: Layer ${data.result.layer}\n`;
+            if (data.result?.failed_stage) {
+                output += `Failed at: Stage ${data.result.failed_stage}\n`;
             }
             if (data.result?.details) {
                 output += `Details: ${JSON.stringify(data.result.details)}\n`;
             }
+            if (data.result?.hint) {
+                output += `Hint: ${data.result.hint}\n`;
+            }
             updateLastOutput("agent universal_analyze", output, "error");
             setStatus("error", "Analysis failed");
+
+            // Re-enable button and hide stepper after delay
+            setTimeout(() => {
+                hideProgressStepper();
+                if (analyzeBtn) analyzeBtn.disabled = false;
+            }, 3000);
             return;
         }
+
+        // Mark all stages complete
+        setStageComplete(1, "Done");
+        setStageComplete(2, "Done");
+        setStageComplete(3, "Done");
 
         const result = data.result;
         let output = "=" .repeat(60) + "\n";
         output += "  UNIVERSAL STATISTICAL ANALYSIS RESULTS\n";
         output += "=" .repeat(60) + "\n\n";
 
-        // Layer 1: Extraction
+        // Stage 1: Extraction
         if (result.layer1_extraction) {
-            output += ">>> LAYER 1: AI ADAPTER (Structure Extraction)\n";
+            output += ">>> STAGE 1: AI DATA ORGANIZER\n";
             output += "-" .repeat(40) + "\n";
             output += `  Groups found: ${result.layer1_extraction.groups_found.join(", ")}\n`;
             output += "  Samples per group:\n";
@@ -1635,11 +1750,11 @@ async function runUniversalAnalysis() {
             output += "\n";
         }
 
-        // Layer 2: Statistics
+        // Stage 2: Statistics
         if (result.layer2_statistics) {
             const stats = result.layer2_statistics;
 
-            output += ">>> LAYER 2: PYTHON MATH ENGINE (Rigorous Statistics)\n";
+            output += ">>> STAGE 2: PYTHON CALCULATOR (No AI Guessing)\n";
             output += "-" .repeat(40) + "\n\n";
 
             // Descriptive stats
@@ -1685,15 +1800,15 @@ async function runUniversalAnalysis() {
             }
         }
 
-        // Layer 3: Interpretation
+        // Stage 3: Interpretation
         if (result.layer3_interpretation) {
-            output += ">>> LAYER 3: AI CONTEXT-AWARE REPORTER\n";
+            output += ">>> STAGE 3: AI REPORTER (Context-Aware Interpretation)\n";
             output += "-" .repeat(40) + "\n\n";
 
             const interp = result.layer3_interpretation;
             if (interp.test_type) {
                 output += `  Test Type: ${interp.test_type.detected_type || "Auto-detected"}\n`;
-                output += `  Interpretation Mode: ${interp.test_type.interpretation}\n\n`;
+                output += `  Interpretation: ${interp.test_type.category === "higher_better" ? "Higher = Better" : interp.test_type.category === "lower_better" ? "Lower = Better" : "Neutral"}\n\n`;
             }
 
             if (interp.report) {
@@ -1715,24 +1830,41 @@ async function runUniversalAnalysis() {
         }
 
         output += "\n" + "=" .repeat(60) + "\n";
-        output += "  END OF UNIVERSAL ANALYSIS\n";
+        output += "  3-STAGE PIPELINE COMPLETE\n";
         output += "=" .repeat(60);
 
         updateLastOutput("agent universal_analyze", output);
-        setStatus("ok", "Universal analysis complete");
+        setStatus("ok", "3-Stage Pipeline complete");
         showToast("Universal analysis complete", "success");
 
-        // Clear the file data
+        // Cleanup: clear file data, hide stepper, re-enable button, close modal
         universalFileData = null;
+        setTimeout(() => {
+            hideProgressStepper();
+            const analyzeBtn = document.getElementById("universal-analyze-btn");
+            if (analyzeBtn) analyzeBtn.disabled = false;
+            closeModal("modal-universal-analyze");
+        }, 1500);
 
     } catch (err) {
         clearTimeout(timeoutId);
+
+        // Mark error in progress stepper
+        setStageError(1, "Failed");
+
         if (err.name === "AbortError") {
             updateLastOutput("agent universal_analyze", "Error: Analysis timed out. Make sure Ollama is running.", "error");
         } else {
             updateLastOutput("agent universal_analyze", `Error: ${err.message}`, "error");
         }
         setStatus("error", "Analysis failed");
+
+        // Cleanup on error
+        setTimeout(() => {
+            hideProgressStepper();
+            const analyzeBtn = document.getElementById("universal-analyze-btn");
+            if (analyzeBtn) analyzeBtn.disabled = false;
+        }, 3000);
     }
 }
 
