@@ -757,9 +757,17 @@ UNIVERSAL_ADAPTER_PROMPT = """You are a data extraction specialist. Your ONLY ta
 
 CRITICAL RULES:
 1. Identify ALL group names (e.g., "Control", "Group A", "Experimental", "Soy Milk", etc.)
-2. Extract ONLY the raw numerical values - IGNORE any rows labeled "Mean", "SD", "Average", "Std Dev", or summary statistics
-3. Each group should have an array of individual measurements
+2. Extract ONLY the raw numerical values - these are individual measurements/observations
+3. Each group should have an array of individual measurements (typically 5-30 values per group)
 4. If the data has time points or conditions, ignore them for now - just group all values by their group name
+
+CRITICAL: IGNORE THESE ROWS COMPLETELY (they are summary statistics, NOT raw data):
+- Any row containing "Mean", "Average", "Avg", "M="
+- Any row containing "SD", "Std Dev", "StDev", "Standard Deviation", "S.D."
+- Any row containing "SEM", "SE", "Standard Error"
+- Any row containing "N=", "n=", "Count", "Total", "Sum"
+- Any row containing "Min", "Max", "Range", "Median"
+- Any row at the BOTTOM of a data column that looks like a calculated value
 
 OUTPUT FORMAT (JSON only, no other text):
 {
@@ -771,9 +779,69 @@ OUTPUT FORMAT (JSON only, no other text):
 EXAMPLES:
 - If you see "Control: 5.2, 5.4, 5.1" → {"Control": [5.2, 5.4, 5.1]}
 - If you see "A1 A2 A3" as headers with values below → {"A1": [...], "A2": [...], "A3": [...]}
-- NEVER include calculated statistics, only raw data points
+- If the last rows show "Mean: 5.3" and "SD: 0.2" → IGNORE these rows entirely
+- NEVER include calculated statistics, only raw individual data points
 
 Output ONLY valid JSON. No explanations."""
+
+
+# Summary row keywords to filter out (Python safety net)
+SUMMARY_ROW_KEYWORDS = [
+    'mean', 'average', 'avg', 'm=',
+    'sd', 'std', 'stdev', 'standard deviation', 's.d.',
+    'sem', 'se', 'standard error',
+    'n=', 'count', 'total', 'sum',
+    'min', 'max', 'range', 'median'
+]
+
+
+def filter_summary_rows_from_text(raw_text: str) -> str:
+    """
+    Pre-filter: Remove lines that contain summary statistics keywords.
+    This runs BEFORE sending to AI as an extra safety measure.
+    """
+    lines = raw_text.split('\n')
+    filtered_lines = []
+
+    for line in lines:
+        line_lower = line.lower().strip()
+        # Skip empty lines
+        if not line_lower:
+            filtered_lines.append(line)
+            continue
+        # Check if line starts with or contains summary keywords
+        is_summary = False
+        for keyword in SUMMARY_ROW_KEYWORDS:
+            if line_lower.startswith(keyword) or f'\t{keyword}' in line_lower or f' {keyword}' in line_lower:
+                is_summary = True
+                break
+        if not is_summary:
+            filtered_lines.append(line)
+
+    return '\n'.join(filtered_lines)
+
+
+def filter_summary_groups(group_data: Dict) -> Dict:
+    """
+    Post-AI filter: Remove any groups that look like summary statistics.
+    Protects against AI misinterpreting Mean/SD rows as group names.
+    """
+    filtered = {}
+    for group_name, values in group_data.items():
+        group_lower = str(group_name).lower().strip()
+        # Skip groups named like summaries
+        is_summary_group = False
+        for keyword in SUMMARY_ROW_KEYWORDS:
+            if keyword in group_lower:
+                is_summary_group = True
+                break
+        if is_summary_group:
+            continue
+        # Keep only valid numeric values
+        if isinstance(values, list) and len(values) > 0:
+            filtered[group_name] = values
+
+    return filtered
 
 
 def layer1_universal_adapter(raw_data_text: str) -> Dict:
@@ -781,12 +849,18 @@ def layer1_universal_adapter(raw_data_text: str) -> Dict:
     LAYER 1: Universal Adapter
     Takes ANY Excel/CSV text layout and outputs standardized JSON.
     Format: {"Group_A": [val1, val2...], "Group_B": [val1, val2...]}
+
+    Includes pre-filtering to remove summary rows (Mean, SD, etc.)
     """
+    # Pre-filter: Remove lines that look like summary statistics
+    filtered_text = filter_summary_rows_from_text(raw_data_text)
+
     prompt = f"""Analyze this spreadsheet data and extract the group structure:
 
-{raw_data_text}
+{filtered_text}
 
-Extract ALL groups and their raw numerical values. Ignore Mean/SD/summary rows.
+Extract ALL groups and their raw numerical values.
+IMPORTANT: Ignore any rows containing Mean, SD, Average, or other summary statistics.
 Output as JSON: {{"Group1": [values], "Group2": [values], ...}}"""
 
     result = call_agent(prompt, UNIVERSAL_ADAPTER_PROMPT, timeout=60)
@@ -826,6 +900,9 @@ Output as JSON: {{"Group1": [values], "Group2": [values], ...}}"""
                 if clean_values:
                     clean_data[str(group_name)] = clean_values
 
+            # Post-filter: Remove any groups that look like summary statistics
+            clean_data = filter_summary_groups(clean_data)
+
             if len(clean_data) < 2:
                 return {"error": f"Not enough valid groups with data. Found: {list(clean_data.keys())}"}
 
@@ -850,7 +927,10 @@ def layer2_rigorous_math(group_data: Dict, alpha: float = 0.05) -> Dict:
     for group_name, values in group_data.items():
         n = len(values)
         if n < 3:
-            validation_errors.append(f"{group_name}: n={n} (need n>2)")
+            validation_errors.append(
+                f"Data Read Error: '{group_name}' has only {n} samples. "
+                "Ensure summary rows (Mean/SD) are excluded and raw data is read."
+            )
         else:
             valid_groups[group_name] = values
 
@@ -858,7 +938,9 @@ def layer2_rigorous_math(group_data: Dict, alpha: float = 0.05) -> Dict:
         return {
             "error": "Data Not Found: Insufficient data for analysis",
             "details": validation_errors,
-            "requirement": "Each group must have n > 2 observations"
+            "requirement": "Each group must have n > 2 observations. "
+                          "If you see n=1 or n=2, the system may have read summary rows "
+                          "(Mean, SD) instead of raw data. Please check your data format."
         }
 
     # Prepare data arrays
