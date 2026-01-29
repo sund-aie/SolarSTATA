@@ -50,6 +50,8 @@
         <div class="menu-item">
             AI Assistant
             <div class="menu-dropdown">
+                <div class="menu-dropdown-item" onclick="openModal('modal-universal-analyze')" style="color:var(--accent-cyan);">[*] Universal Analysis Agent</div>
+                <div class="menu-separator"></div>
                 <div class="menu-dropdown-item" onclick="runAIAnalysis()">[AI] Full Analysis <span class="shortcut">F5</span></div>
                 <div class="menu-dropdown-item" onclick="openModal('modal-smart-analyze')">[?] Smart Statistical Router</div>
                 <div class="menu-separator"></div>
@@ -142,15 +144,15 @@
                         searches literature, calculates sample sizes, and selects appropriate statistical tests automatically.
                     </div>
                     <div class="quick-actions">
+                        <div class="quick-action" onclick="openModal('modal-universal-analyze')" style="border-color:var(--accent-cyan);">
+                            <div class="icon ascii-icon">[*]</div>
+                            <div class="label">Universal Agent</div>
+                            <div class="desc">ANY dental data format</div>
+                        </div>
                         <div class="quick-action" onclick="openFile()">
                             <div class="icon ascii-icon">[+]</div>
                             <div class="label">Open Data</div>
                             <div class="desc">CSV, Excel, Stata (.dta)</div>
-                        </div>
-                        <div class="quick-action" onclick="runAIAnalysis()">
-                            <div class="icon ascii-icon">[AI]</div>
-                            <div class="label">AI Analysis</div>
-                            <div class="desc">Auto-detect tests</div>
                         </div>
                         <div class="quick-action" onclick="openModal('modal-smart-analyze')">
                             <div class="icon ascii-icon">[?]</div>
@@ -790,6 +792,92 @@ Or: '5.2 +/- 1.3 vs 7.8 +/- 1.5'"></textarea>
             <button class="btn btn-secondary" onclick="closeModal('modal-proposal-upload')">[Cancel]</button>
             <button class="btn btn-secondary" onclick="checkProposalReferences()">[Check References]</button>
             <button class="btn btn-primary" onclick="uploadProposal()">[Store Context]</button>
+        </div>
+    </div>
+</div>
+
+<!-- Universal Statistical Analysis Agent (3-Layer Architecture) -->
+<div class="modal-overlay" id="modal-universal-analyze">
+    <div class="modal" style="max-width:750px;">
+        <div class="modal-header">
+            <div class="modal-title">[*] Universal Statistical Analysis Agent</div>
+            <div class="modal-close" onclick="closeModal('modal-universal-analyze')">[x]</div>
+        </div>
+        <div class="modal-body">
+            <p style="font-size:11px;color:var(--text-muted);margin-bottom:12px;">
+                >>> 3-Layer Architecture for ANY Dental Research Data:<br>
+                <strong>Layer 1:</strong> AI extracts groups from ANY Excel layout<br>
+                <strong>Layer 2:</strong> Python runs ANOVA + Tukey (rigorous math)<br>
+                <strong>Layer 3:</strong> AI interprets results (context-aware)
+            </p>
+
+            <!-- Drag & Drop Zone -->
+            <div id="universal-drop-zone" class="drop-zone"
+                 ondragover="handleDragOver(event)"
+                 ondragleave="handleDragLeave(event)"
+                 ondrop="handleFileDrop(event)">
+                <div class="drop-zone-content">
+                    <span style="font-size:24px;margin-bottom:8px;">[+]</span>
+                    <span>Drag & Drop Excel/CSV file here</span>
+                    <span style="font-size:10px;margin-top:4px;">or click to browse</span>
+                </div>
+                <input type="file" id="universal-file-input" accept=".csv,.xlsx,.xls"
+                       onchange="handleFileSelect(event)" style="display:none;">
+            </div>
+
+            <!-- OR Paste Data -->
+            <div style="text-align:center;margin:12px 0;color:var(--text-muted);font-size:11px;">
+                --- OR paste data directly ---
+            </div>
+
+            <div class="form-group">
+                <label>Paste Raw Data (any layout)</label>
+                <textarea id="universal-data-text" class="form-control" rows="8" placeholder="Paste data from Excel/CSV...
+
+Example formats (AI will understand ANY layout):
+Group A: 5.2, 5.4, 5.1, 5.3
+Group B: 7.2, 7.0, 7.4, 7.1
+
+OR
+
+Control  Treatment1  Treatment2
+5.2      6.1         7.2
+5.4      6.3         7.0
+5.1      5.9         7.4"></textarea>
+            </div>
+
+            <!-- Test Type Selection -->
+            <div class="form-group" style="display:flex;gap:12px;align-items:flex-end;">
+                <div style="flex:2;">
+                    <label>Test Type (auto-detected from headers)</label>
+                    <select id="universal-test-type" class="form-control">
+                        <option value="">Auto-detect from data</option>
+                        <option value="higher">Higher = Better (Hardness, Bond Strength)</option>
+                        <option value="lower">Lower = Better (Biofilm, Roughness)</option>
+                    </select>
+                </div>
+                <div style="flex:1;">
+                    <label>Significance</label>
+                    <input type="number" id="universal-alpha" class="form-control" value="0.05" step="0.01">
+                </div>
+            </div>
+
+            <!-- Proposal Context -->
+            <div class="form-group">
+                <label>Research Context (optional - helps interpretation)</label>
+                <input type="text" id="universal-context" class="form-control"
+                       placeholder="e.g., Microhardness of dental composites after soy milk immersion">
+            </div>
+
+            <!-- File Status -->
+            <div id="universal-file-status" style="display:none;padding:8px;background:var(--bg-tertiary);border-radius:4px;margin-top:8px;">
+                <span id="universal-file-name"></span>
+                <button onclick="clearUniversalFile()" style="float:right;background:none;border:none;color:var(--text-muted);cursor:pointer;">[x]</button>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button class="btn btn-secondary" onclick="closeModal('modal-universal-analyze')">[Cancel]</button>
+            <button class="btn btn-primary" onclick="runUniversalAnalysis()">[Analyze]</button>
         </div>
     </div>
 </div>

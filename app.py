@@ -763,6 +763,95 @@ def parse_pdf_endpoint():
         return jsonify({"error": str(e)}), 500
 
 
+@app.route("/api/agent/universal_analyze", methods=["POST"])
+def universal_analyze():
+    """
+    3-Layer Universal Statistical Analysis Agent:
+
+    Layer 1: Universal Adapter (AI)
+        - Takes ANY Excel layout and extracts standardized JSON
+        - Format: {"Group_A": [val1, val2...], "Group_B": [val1, val2...]}
+
+    Layer 2: Rigorous Math Engine (Python)
+        - Validates n > 2 per group
+        - Runs One-Way ANOVA (scipy.stats.f_oneway)
+        - Runs Tukey HSD post-hoc (statsmodels)
+        - Calculates Mean, SD, 95% CI
+
+    Layer 3: Context-Aware Reporter (AI)
+        - Detects test type from headers/proposal
+        - Applies correct interpretation (higher vs lower = better)
+        - Generates academic results paragraph
+    """
+    data = request.json or {}
+    raw_text = data.get("raw_text", "")
+    proposal_context = data.get("proposal_context", "")
+    test_type_hint = data.get("test_type", None)  # "higher", "lower", or auto-detect
+
+    if not raw_text:
+        return jsonify({"error": "No data provided. Paste your Excel/CSV data."}), 400
+
+    try:
+        result = agent_core.run_universal_analysis(raw_text, proposal_context, test_type_hint)
+        log_command("agent universal_analyze")
+        return jsonify({"result": json.loads(json.dumps(result, default=numpy_safe))})
+    except Exception as e:
+        return jsonify({"error": str(e), "traceback": traceback.format_exc()}), 500
+
+
+@app.route("/api/agent/universal_analyze_file", methods=["POST"])
+def universal_analyze_file():
+    """
+    Universal Analysis with file upload (Excel/CSV).
+    Extracts raw text from file, then runs 3-layer analysis.
+    """
+    if "file" not in request.files:
+        return jsonify({"error": "No file uploaded"}), 400
+
+    file = request.files["file"]
+    if file.filename == "":
+        return jsonify({"error": "No file selected"}), 400
+
+    filename = secure_filename(file.filename)
+    ext = filename.rsplit(".", 1)[1].lower() if "." in filename else ""
+
+    if ext not in ALLOWED_EXTENSIONS:
+        return jsonify({"error": f"Unsupported file type. Allowed: {', '.join(ALLOWED_EXTENSIONS)}"}), 400
+
+    filepath = os.path.join(app.config["UPLOAD_FOLDER"], filename)
+    file.save(filepath)
+
+    try:
+        # Read file as text for AI processing
+        if ext == "csv":
+            df = pd.read_csv(filepath, header=None)
+        elif ext in ("xlsx", "xls"):
+            df = pd.read_excel(filepath, header=None)
+        elif ext == "tsv" or ext == "txt":
+            df = pd.read_csv(filepath, sep="\t", header=None)
+        else:
+            df = pd.read_csv(filepath, header=None)
+
+        # Convert DataFrame to text representation for AI
+        raw_text = df.to_string(index=False, header=False)
+
+        # Get optional form data
+        proposal_context = request.form.get("proposal_context", "")
+        test_type_hint = request.form.get("test_type", None)
+
+        # Run universal analysis
+        result = agent_core.run_universal_analysis(raw_text, proposal_context, test_type_hint)
+        log_command(f"agent universal_analyze_file {filename}")
+
+        return jsonify({"result": json.loads(json.dumps(result, default=numpy_safe)), "filename": filename})
+
+    except Exception as e:
+        return jsonify({"error": str(e), "traceback": traceback.format_exc()}), 500
+    finally:
+        if os.path.exists(filepath):
+            os.remove(filepath)
+
+
 # ---------------------------------------------------------------------------
 # COMMAND LINE INTERFACE (Stata-style command execution)
 # ---------------------------------------------------------------------------
