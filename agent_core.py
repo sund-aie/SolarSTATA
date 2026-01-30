@@ -821,10 +821,13 @@ Extract every raw numerical value with its group and time point.
 Output as JSON array: [{{"group": "X", "time_point": "Y", "value": Z}}, ...]
 If no time points exist, use "All" as the time_point."""
 
-    result = call_agent(prompt, STAGE1_ORGANIZER_PROMPT, timeout=90)
+    result = call_agent(prompt, STAGE1_ORGANIZER_PROMPT, timeout=180)
 
     if not result["success"]:
-        return {"error": f"AI Organizer failed: {result.get('error', 'Unknown error')}", "stage": 1}
+        error_msg = result.get("error", "Unknown error")
+        if "Timeout" in error_msg:
+            error_msg = f"AI Organizer timed out. Ensure Ollama is running ('ollama serve') and a model is loaded."
+        return {"error": error_msg, "stage": 1}
 
     # Parse JSON from response
     response = result["response"]
@@ -1225,7 +1228,7 @@ RESEARCH CONTEXT:
 
 Generate a clear, professional interpretation using the exact statistics above."""
 
-    result = call_agent(prompt, system_prompt, timeout=90)
+    result = call_agent(prompt, system_prompt, timeout=180)
 
     if result["success"]:
         return result["response"]

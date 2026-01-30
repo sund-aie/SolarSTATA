@@ -527,11 +527,214 @@ async function apiPost(url, payload, cmdLabel) {
 function formatResult(obj) {
     if (obj === null || obj === undefined) return "No result";
     if (typeof obj === "string") return obj;
+
+    // Check for pre-formatted output keys
+    if (obj.output) return obj.output;
+    if (obj.result_str) return obj.result_str;
+    if (obj.summary) return obj.summary;
+    if (obj.stdout) return obj.stdout;
+
+    // Format arrays as tables
+    if (Array.isArray(obj)) return formatTable(obj);
+
+    // Smart formatting for stat result dicts
     try {
-        return JSON.stringify(obj, null, 2);
+        return formatStatResult(obj);
     } catch {
-        return String(obj);
+        try {
+            return JSON.stringify(obj, null, 2);
+        } catch {
+            return String(obj);
+        }
     }
+}
+
+function formatStatResult(obj) {
+    let lines = [];
+
+    // Test name / header
+    if (obj.test) {
+        lines.push(`  Test: ${obj.test}`);
+        lines.push("  " + "=".repeat(50));
+    }
+
+    // Error handling
+    if (obj.error) {
+        lines.push(`  Error: ${obj.error}`);
+        return lines.join("\n");
+    }
+
+    // T-test results
+    if (obj.t_stat !== undefined || obj.t !== undefined) {
+        const t = obj.t_stat ?? obj.t;
+        lines.push("");
+        if (obj.Variable) lines.push(`  Variable: ${obj.Variable}`);
+        if (obj.Obs) lines.push(`  Obs: ${obj.Obs}`);
+        if (obj.Mean !== undefined) lines.push(`  Mean: ${obj.Mean}`);
+        if (obj["Std. Err."] !== undefined) lines.push(`  Std. Err.: ${obj["Std. Err."]}`);
+        if (obj["95% CI"]) lines.push(`  95% CI: [${obj["95% CI"].join(", ")}]`);
+        lines.push("");
+        lines.push(`  t = ${typeof t === "number" ? t.toFixed(4) : t}`);
+        if (obj.df !== undefined) lines.push(`  df = ${obj.df}`);
+        if (obj.p !== undefined) lines.push(`  p = ${typeof obj.p === "number" ? obj.p.toFixed(6) : obj.p}`);
+        if (obj["p (two-tail)"] !== undefined) lines.push(`  p (two-tail) = ${obj["p (two-tail)"]}`);
+        if (obj.Group_1) lines.push(`\n  Group 1: ${obj.Group_1} (n=${obj.n1}, mean=${obj.mean1})`);
+        if (obj.Group_2) lines.push(`  Group 2: ${obj.Group_2} (n=${obj.n2}, mean=${obj.mean2})`);
+        if (obj.mean_diff !== undefined) lines.push(`  Mean Difference: ${obj.mean_diff}`);
+        return lines.join("\n");
+    }
+
+    // Chi-square results
+    if (obj.chi2 !== undefined && obj.Pr !== undefined) {
+        lines.push("");
+        lines.push(`  Pearson chi2(${obj.df ?? "?"}) = ${obj.chi2}`);
+        lines.push(`  Pr = ${obj.Pr}`);
+        if (obj.cramers_v !== undefined) lines.push(`  Cramer's V = ${obj.cramers_v}`);
+        if (obj.observed_str) lines.push(`\n  Observed:\n${obj.observed_str}`);
+        if (obj.expected_str) lines.push(`\n  Expected:\n${obj.expected_str}`);
+        return lines.join("\n");
+    }
+
+    // Fisher's exact
+    if (obj.odds_ratio !== undefined && obj.p !== undefined && !obj.t_stat) {
+        lines.push("");
+        lines.push(`  Odds Ratio: ${obj.odds_ratio}`);
+        lines.push(`  p-value: ${obj.p}`);
+        if (obj["95% CI"]) lines.push(`  95% CI: [${obj["95% CI"].join(", ")}]`);
+        if (obj.observed_str) lines.push(`\n${obj.observed_str}`);
+        return lines.join("\n");
+    }
+
+    // Normality test
+    if (obj.Skewness_z !== undefined || obj.Shapiro_W !== undefined) {
+        lines.push("");
+        if (obj.Variable) lines.push(`  Variable: ${obj.Variable}`);
+        if (obj.Obs) lines.push(`  Obs: ${obj.Obs}`);
+        if (obj.Shapiro_W !== undefined) lines.push(`  Shapiro-Wilk W = ${obj.Shapiro_W}`);
+        if (obj.Shapiro_p !== undefined) lines.push(`  Shapiro-Wilk p = ${obj.Shapiro_p}`);
+        if (obj.Skewness_z !== undefined) lines.push(`  Skewness z = ${obj.Skewness_z}`);
+        if (obj.Kurtosis_z !== undefined) lines.push(`  Kurtosis z = ${obj.Kurtosis_z}`);
+        if (obj.Kurtosis_p !== undefined) lines.push(`  Kurtosis p = ${obj.Kurtosis_p}`);
+        if (obj.normal !== undefined) lines.push(`\n  Normal: ${obj.normal ? "Yes (p >= 0.05)" : "No (p < 0.05)"}`);
+        return lines.join("\n");
+    }
+
+    // Nonparametric: Mann-Whitney, Kruskal-Wallis, Wilcoxon
+    if (obj.U !== undefined) {
+        lines.push(`\n  U = ${obj.U}`);
+        lines.push(`  p = ${obj.p}`);
+        if (obj.Group_1) lines.push(`  ${obj.Group_1}: n=${obj.n1}, median=${obj.median1 ?? "N/A"}, mean_rank=${obj.mean_rank1 ?? "N/A"}`);
+        if (obj.Group_2) lines.push(`  ${obj.Group_2}: n=${obj.n2}, median=${obj.median2 ?? "N/A"}, mean_rank=${obj.mean_rank2 ?? "N/A"}`);
+        return lines.join("\n");
+    }
+    if (obj.H !== undefined) {
+        lines.push(`\n  H = ${obj.H}`);
+        lines.push(`  df = ${obj.df}`);
+        lines.push(`  p = ${obj.p}`);
+        if (obj.groups) {
+            lines.push("");
+            obj.groups.forEach(g => {
+                lines.push(`  ${g.Group}: n=${g.N}, median=${g.Median ?? "N/A"}, mean_rank=${g.Mean_Rank ?? "N/A"}`);
+            });
+        }
+        return lines.join("\n");
+    }
+    if (obj.T !== undefined && obj.p !== undefined && !obj.t_stat) {
+        lines.push(`\n  T = ${obj.T}`);
+        lines.push(`  p = ${obj.p}`);
+        if (obj.n) lines.push(`  n = ${obj.n}`);
+        return lines.join("\n");
+    }
+
+    // Correlation matrix
+    if (obj.correlation_str) {
+        lines.push("");
+        lines.push(obj.correlation_str);
+        if (obj.p_values_str) {
+            lines.push("\n  P-values:");
+            lines.push(obj.p_values_str);
+        }
+        return lines.join("\n");
+    }
+
+    // Post-hoc: Tukey / Bonferroni
+    if (obj.comparisons && Array.isArray(obj.comparisons)) {
+        if (obj.test) lines.push("");
+        lines.push(`  ${"Comparison".padEnd(30)} ${"Diff".padStart(10)} ${"p-value".padStart(12)} Sig`);
+        lines.push("  " + "-".repeat(58));
+        obj.comparisons.forEach(c => {
+            const comp = `${c.group1 || c.Group1} vs ${c.group2 || c.Group2}`;
+            const diff = c.mean_diff ?? c.meandiff ?? c.diff ?? "";
+            const p = c.p_adj ?? c.p ?? c["p-adj"] ?? "";
+            const sig = (c.significant || c.reject) ? " ***" : "";
+            const diffStr = typeof diff === "number" ? diff.toFixed(4) : String(diff);
+            const pStr = typeof p === "number" ? p.toFixed(6) : String(p);
+            lines.push(`  ${comp.padEnd(30)} ${diffStr.padStart(10)} ${pStr.padStart(12)}${sig}`);
+        });
+        return lines.join("\n");
+    }
+
+    // Power analysis
+    if (obj.power !== undefined && obj.n !== undefined) {
+        lines.push("");
+        lines.push(`  Power: ${obj.power}`);
+        lines.push(`  N per group: ${obj.n}`);
+        if (obj.effect_size !== undefined) lines.push(`  Effect size: ${obj.effect_size}`);
+        if (obj.alpha !== undefined) lines.push(`  Alpha: ${obj.alpha}`);
+        return lines.join("\n");
+    }
+
+    // Repeated measures / Friedman
+    if (obj.F !== undefined && obj.p_value !== undefined) {
+        lines.push("");
+        lines.push(`  F = ${obj.F}`);
+        lines.push(`  p = ${obj.p_value}`);
+        if (obj.condition_stats && Array.isArray(obj.condition_stats)) {
+            lines.push(`\n  ${"Condition".padEnd(20)} ${"N".padStart(6)} ${"Mean".padStart(12)} ${"SD".padStart(12)}`);
+            lines.push("  " + "-".repeat(50));
+            obj.condition_stats.forEach(cs => {
+                const name = cs.Condition || cs.condition || cs.Group || "";
+                lines.push(`  ${String(name).padEnd(20)} ${String(cs.N ?? "").padStart(6)} ${typeof cs.Mean === "number" ? cs.Mean.toFixed(4).padStart(12) : String(cs.Mean ?? "").padStart(12)} ${typeof cs.SD === "number" ? cs.SD.toFixed(4).padStart(12) : String(cs.SD ?? "").padStart(12)}`);
+            });
+        }
+        return lines.join("\n");
+    }
+    if (obj.chi2 !== undefined && obj.p_value !== undefined) {
+        lines.push("");
+        lines.push(`  Chi2 = ${obj.chi2}`);
+        lines.push(`  df = ${obj.df}`);
+        lines.push(`  p = ${obj.p_value}`);
+        if (obj.kendall_w !== undefined) lines.push(`  Kendall's W = ${obj.kendall_w}`);
+        return lines.join("\n");
+    }
+
+    // Fallback: format key-value pairs nicely
+    for (const [key, val] of Object.entries(obj)) {
+        if (val === null || val === undefined) continue;
+        if (typeof val === "object" && !Array.isArray(val)) {
+            lines.push(`\n  ${key}:`);
+            for (const [k2, v2] of Object.entries(val)) {
+                if (typeof v2 === "object" && v2 !== null) {
+                    lines.push(`    ${k2}: ${JSON.stringify(v2)}`);
+                } else {
+                    lines.push(`    ${k2}: ${v2}`);
+                }
+            }
+        } else if (Array.isArray(val)) {
+            if (val.length > 0 && typeof val[0] === "object") {
+                lines.push(`\n  ${key}:`);
+                val.forEach((item, i) => {
+                    const entries = Object.entries(item).map(([k, v]) => `${k}=${v}`).join(", ");
+                    lines.push(`    [${i + 1}] ${entries}`);
+                });
+            } else {
+                lines.push(`  ${key}: ${JSON.stringify(val)}`);
+            }
+        } else {
+            lines.push(`  ${key}: ${val}`);
+        }
+    }
+    return lines.join("\n");
 }
 
 function getMultiSelectValues(id) {
