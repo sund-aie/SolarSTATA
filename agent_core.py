@@ -2,12 +2,15 @@
 SolarSTATA Agent Core
 Agentic workflow orchestrator using Ollama for reasoning and Python for computation.
 Implements the separation: Math=Python, Search=Python, Logic/Text=Ollama
+
+When Ollama is unavailable, Python-based fallbacks handle Stage 1 (data parsing)
+and Stage 3 (report generation) so the pipeline works without an LLM server.
 """
 
-import ollama
 import subprocess
 import json
 import re
+import io
 import pandas as pd
 import numpy as np
 from scipy import stats as sp_stats
@@ -15,6 +18,14 @@ from statsmodels.stats.multicomp import pairwise_tukeyhsd
 import threading
 import queue
 from typing import Optional, Dict, List, Any
+
+# Try to import Ollama client
+try:
+    import ollama
+    HAS_OLLAMA_CLIENT = True
+except ImportError:
+    HAS_OLLAMA_CLIENT = False
+    print("[Agent] ollama Python client not installed. AI features will use Python fallbacks.")
 
 # Try to import web search tools
 try:
@@ -68,7 +79,9 @@ def get_available_models() -> List[str]:
 
 
 def check_ollama_running() -> bool:
-    """Check if Ollama service is running."""
+    """Check if Ollama service is running and reachable."""
+    if not HAS_OLLAMA_CLIENT:
+        return False
     try:
         result = subprocess.run(
             ["ollama", "list"],
@@ -77,8 +90,30 @@ def check_ollama_running() -> bool:
             timeout=5
         )
         return result.returncode == 0
-    except Exception:
+    except (FileNotFoundError, Exception):
         return False
+
+
+# Cached Ollama availability (checked once, then cached)
+_ollama_available = None
+
+
+def is_ollama_available() -> bool:
+    """Check if Ollama is available (cached after first check)."""
+    global _ollama_available
+    if _ollama_available is None:
+        _ollama_available = check_ollama_running()
+        if not _ollama_available:
+            print("[Agent] Ollama not available. Using Python fallbacks for Stage 1 & 3.")
+        else:
+            print("[Agent] Ollama is available.")
+    return _ollama_available
+
+
+def reset_ollama_check():
+    """Reset the cached Ollama check (e.g., after user starts Ollama)."""
+    global _ollama_available
+    _ollama_available = None
 
 
 # Current model selection
@@ -188,6 +223,12 @@ def call_agent(prompt: str, system_prompt: str = None, timeout: int = 120) -> Di
     Call the Ollama agent with a timeout.
     Returns: {"success": bool, "response": str, "error": str}
     """
+    if not HAS_OLLAMA_CLIENT:
+        return {"success": False, "error": "Ollama Python client not installed"}
+
+    if not is_ollama_available():
+        return {"success": False, "error": "Ollama server not available"}
+
     result_queue = queue.Queue()
 
     def _call():
@@ -799,13 +840,232 @@ If there are NO time points, use "All" as the time_point value.
 Output ONLY valid JSON array. No explanations, no markdown, just the JSON."""
 
 
+def stage1_python_fallback(raw_text: str, progress_callback=None) -> Dict:
+    """
+    STAGE 1 FALLBACK: Python-based data parser.
+    Parses tabular data without AI when Ollama is unavailable.
+
+    Handles:
+    - Tab/comma/space-separated data with group headers
+    - Column-oriented data (groups as columns)
+    - Row-oriented data (groups as rows)
+
+    Output format: [{"group": "X", "time_point": "Y", "value": Z}, ...]
+    """
+    if progress_callback:
+        progress_callback("stage1", "Parsing Data (Python)...")
+
+    # Pre-filter summary rows
+    filtered_text = _filter_summary_rows(raw_text)
+    lines = [l for l in filtered_text.strip().split('\n') if l.strip()]
+
+    if not lines:
+        return {"error": "No data found in input", "stage": 1}
+
+    observations = []
+
+    # Strategy 1: Try parsing as tab-separated with headers
+    obs = _try_parse_columns(lines, '\t')
+    if obs and len(obs) >= 3:
+        observations = obs
+
+    # Strategy 2: Try comma-separated
+    if not observations:
+        obs = _try_parse_columns(lines, ',')
+        if obs and len(obs) >= 3:
+            observations = obs
+
+    # Strategy 3: Try multi-space separated (Excel copy-paste)
+    if not observations:
+        obs = _try_parse_columns(lines, None)  # None = whitespace split
+        if obs and len(obs) >= 3:
+            observations = obs
+
+    # Strategy 4: Try pandas read_csv on the text
+    if not observations:
+        obs = _try_parse_with_pandas(filtered_text)
+        if obs and len(obs) >= 3:
+            observations = obs
+
+    if len(observations) < 3:
+        return {
+            "error": f"Python parser found only {len(observations)} values. "
+                     "Data may need a different format. Try tab-separated columns with group headers.",
+            "stage": 1,
+            "fallback": True
+        }
+
+    # Summary
+    groups_found = list(set(o["group"] for o in observations))
+    timepoints_found = list(set(o["time_point"] for o in observations))
+
+    return {
+        "success": True,
+        "observations": observations,
+        "summary": {
+            "total_observations": len(observations),
+            "groups": groups_found,
+            "time_points": timepoints_found,
+            "n_groups": len(groups_found),
+            "n_timepoints": len(timepoints_found)
+        },
+        "fallback": True
+    }
+
+
+def _try_parse_columns(lines: List[str], delimiter) -> List[Dict]:
+    """Try to parse data as column-oriented (groups as column headers)."""
+    if not lines:
+        return []
+
+    # Split header line
+    if delimiter:
+        headers = [h.strip() for h in lines[0].split(delimiter) if h.strip()]
+    else:
+        headers = lines[0].split()
+
+    if not headers:
+        return []
+
+    # Check if headers look like group names (not all numeric)
+    numeric_headers = 0
+    for h in headers:
+        try:
+            float(h.replace(',', ''))
+            numeric_headers += 1
+        except (ValueError, TypeError):
+            pass
+
+    # If all headers are numeric, this isn't a header row
+    if numeric_headers == len(headers):
+        return []
+
+    # Filter out headers that are numeric (they aren't group names)
+    group_headers = []
+    group_indices = []
+    for i, h in enumerate(headers):
+        try:
+            float(h.replace(',', ''))
+            # It's a number, skip
+        except (ValueError, TypeError):
+            if h and not _is_summary_keyword(h):
+                group_headers.append(h)
+                group_indices.append(i)
+
+    if len(group_headers) < 2:
+        return []
+
+    observations = []
+    for line in lines[1:]:
+        if not line.strip():
+            continue
+
+        if delimiter:
+            values = [v.strip() for v in line.split(delimiter)]
+        else:
+            values = line.split()
+
+        for idx, group in zip(group_indices, group_headers):
+            if idx < len(values):
+                val_str = values[idx].strip().replace(',', '')
+                if not val_str:
+                    continue
+                # Skip summary keywords in value position
+                if _is_summary_keyword(val_str):
+                    continue
+                try:
+                    val = float(val_str)
+                    if not np.isnan(val) and not np.isinf(val):
+                        observations.append({
+                            "group": group,
+                            "time_point": "All",
+                            "value": val
+                        })
+                except (ValueError, TypeError):
+                    continue
+
+    return observations
+
+
+def _try_parse_with_pandas(raw_text: str) -> List[Dict]:
+    """Try using pandas to parse the data."""
+    observations = []
+
+    for sep in ['\t', ',', r'\s+']:
+        try:
+            df = pd.read_csv(io.StringIO(raw_text), sep=sep, engine='python')
+
+            if df.empty or len(df.columns) < 2:
+                continue
+
+            # Check if columns are group names
+            numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+            non_numeric_cols = [c for c in df.columns if c not in numeric_cols]
+
+            # Case 1: All columns are numeric with string headers = groups as columns
+            if len(numeric_cols) >= 2:
+                for col in numeric_cols:
+                    col_name = str(col)
+                    if _is_summary_keyword(col_name):
+                        continue
+                    for val in df[col].dropna():
+                        try:
+                            v = float(val)
+                            if not np.isnan(v) and not np.isinf(v):
+                                observations.append({
+                                    "group": col_name,
+                                    "time_point": "All",
+                                    "value": v
+                                })
+                        except (ValueError, TypeError):
+                            continue
+
+                if len(observations) >= 3:
+                    return observations
+                observations = []
+
+            # Case 2: First column is group label, rest are values
+            if non_numeric_cols and numeric_cols:
+                group_col = non_numeric_cols[0]
+                for _, row in df.iterrows():
+                    group = str(row[group_col]).strip()
+                    if _is_summary_keyword(group):
+                        continue
+                    for col in numeric_cols:
+                        try:
+                            v = float(row[col])
+                            if not np.isnan(v) and not np.isinf(v):
+                                observations.append({
+                                    "group": group,
+                                    "time_point": str(col),
+                                    "value": v
+                                })
+                        except (ValueError, TypeError):
+                            continue
+
+                if len(observations) >= 3:
+                    return observations
+                observations = []
+
+        except Exception:
+            continue
+
+    return observations
+
+
 def stage1_ai_organizer(raw_text: str, progress_callback=None) -> Dict:
     """
     STAGE 1: AI DATA ORGANIZER
 
     Takes raw spreadsheet text dump and uses AI to extract clean JSON.
     Output format: [{"group": "X", "time_point": "Y", "value": Z}, ...]
+
+    Falls back to Python parser if Ollama is unavailable.
     """
+    # Check if Ollama is available; if not, use Python fallback
+    if not is_ollama_available():
+        return stage1_python_fallback(raw_text, progress_callback)
+
     if progress_callback:
         progress_callback("stage1", "AI Organizing Data...")
 
@@ -824,10 +1084,9 @@ If no time points exist, use "All" as the time_point."""
     result = call_agent(prompt, STAGE1_ORGANIZER_PROMPT, timeout=180)
 
     if not result["success"]:
-        error_msg = result.get("error", "Unknown error")
-        if "Timeout" in error_msg:
-            error_msg = f"AI Organizer timed out. Ensure Ollama is running ('ollama serve') and a model is loaded."
-        return {"error": error_msg, "stage": 1}
+        # Fall back to Python parser if AI fails
+        print(f"[Agent] AI Organizer failed: {result.get('error')}. Falling back to Python parser.")
+        return stage1_python_fallback(raw_text, progress_callback)
 
     # Parse JSON from response
     response = result["response"]
@@ -1164,6 +1423,132 @@ Be specific: state exact p-values, mean differences, and group comparisons.
 Do NOT include methodology - only results interpretation."""
 
 
+def stage3_python_fallback(stats_results: Dict, proposal_context: str = "",
+                           test_type_hint: str = None, progress_callback=None) -> str:
+    """
+    STAGE 3 FALLBACK: Python template-based report generator.
+    Produces a professional statistical report without AI when Ollama is unavailable.
+    """
+    if progress_callback:
+        progress_callback("stage3", "Generating Report (Python)...")
+
+    lines = []
+    lines.append("=" * 64)
+    lines.append("  STATISTICAL ANALYSIS REPORT")
+    lines.append("=" * 64)
+
+    # Detect test type
+    test_info = _detect_test_type(proposal_context, test_type_hint)
+    category = test_info.get("category", "unknown")
+    detected = test_info.get("detected_type", "")
+
+    if detected:
+        lines.append(f"  Test Type: {detected} ({'higher = better' if category == 'higher_better' else 'lower = better' if category == 'lower_better' else 'neutral'})")
+    lines.append("")
+
+    # --- Descriptive Statistics ---
+    desc = stats_results.get("descriptive", {})
+    if desc:
+        lines.append("-" * 64)
+        lines.append("  DESCRIPTIVE STATISTICS")
+        lines.append("-" * 64)
+        lines.append(f"  {'Group':<20} {'N':>5} {'Mean':>10} {'SD':>10} {'SEM':>10} {'95% CI':>20}")
+        lines.append("  " + "-" * 58)
+        for group, s in desc.items():
+            ci = s.get("ci_95", [None, None])
+            ci_str = f"[{ci[0]:.2f}, {ci[1]:.2f}]" if ci[0] is not None else "N/A"
+            lines.append(f"  {group:<20} {s['n']:>5} {s['mean']:>10.4f} {s['std']:>10.4f} {s['sem']:>10.4f} {ci_str:>20}")
+        lines.append("")
+
+    # --- ANOVA Results ---
+    anova = stats_results.get("anova", {})
+    if anova:
+        lines.append("-" * 64)
+        lines.append("  ONE-WAY ANOVA")
+        lines.append("-" * 64)
+        f_stat = anova.get("F_statistic", "N/A")
+        p_val = anova.get("p_value", "N/A")
+        sig = anova.get("significant", False)
+
+        lines.append(f"  F-statistic: {f_stat}")
+        lines.append(f"  p-value:     {p_val}")
+
+        if isinstance(p_val, (int, float)):
+            if p_val < 0.001:
+                lines.append("  Result:      *** HIGHLY SIGNIFICANT (p < 0.001)")
+            elif p_val < 0.01:
+                lines.append("  Result:      ** VERY SIGNIFICANT (p < 0.01)")
+            elif p_val < 0.05:
+                lines.append("  Result:      * SIGNIFICANT (p < 0.05)")
+            else:
+                lines.append("  Result:      Not significant (p >= 0.05)")
+        lines.append("")
+
+        # Interpretation
+        if sig and desc:
+            sorted_groups = sorted(desc.items(), key=lambda x: x[1]["mean"], reverse=True)
+            best_group = sorted_groups[0][0] if category == "higher_better" else sorted_groups[-1][0] if category == "lower_better" else None
+            worst_group = sorted_groups[-1][0] if category == "higher_better" else sorted_groups[0][0] if category == "lower_better" else None
+
+            if best_group:
+                lines.append(f"  Interpretation: {best_group} showed the {'highest' if category == 'higher_better' else 'lowest'} mean,")
+                lines.append(f"  indicating {'superior' if category != 'unknown' else 'different'} performance.")
+            else:
+                lines.append("  Interpretation: Significant differences exist between groups.")
+        elif not sig:
+            lines.append("  Interpretation: No statistically significant differences between groups.")
+        lines.append("")
+
+    # --- Post-hoc Tukey HSD ---
+    posthoc = stats_results.get("posthoc")
+    if posthoc and posthoc.get("comparisons"):
+        lines.append("-" * 64)
+        lines.append("  POST-HOC: TUKEY HSD PAIRWISE COMPARISONS")
+        lines.append("-" * 64)
+        lines.append(f"  {'Comparison':<30} {'Diff':>8} {'p-adj':>10} {'Sig':>6}")
+        lines.append("  " + "-" * 54)
+        for comp in posthoc["comparisons"]:
+            sig_mark = "***" if comp["significant"] and comp["p_adj"] < 0.001 else \
+                       "**" if comp["significant"] and comp["p_adj"] < 0.01 else \
+                       "*" if comp["significant"] else ""
+            pair = f"{comp['group1']} vs {comp['group2']}"
+            lines.append(f"  {pair:<30} {comp['mean_diff']:>8.4f} {comp['p_adj']:>10.6f} {sig_mark:>6}")
+        lines.append("")
+
+        # Summarize significant pairs
+        sig_pairs = [c for c in posthoc["comparisons"] if c["significant"]]
+        if sig_pairs:
+            lines.append(f"  Significant pairs ({len(sig_pairs)}):")
+            for c in sig_pairs:
+                lines.append(f"    - {c['group1']} vs {c['group2']} (p = {c['p_adj']:.6f})")
+        else:
+            lines.append("  No pairwise comparisons reached significance.")
+        lines.append("")
+
+    # --- Power Analysis ---
+    power = stats_results.get("power_analysis")
+    if power and not power.get("error"):
+        lines.append("-" * 64)
+        lines.append("  POWER ANALYSIS")
+        lines.append("-" * 64)
+        lines.append(f"  Effect size (Cohen's f): {power.get('effect_size_f', 'N/A')}")
+        lines.append(f"  Effect interpretation:   {power.get('effect_interpretation', 'N/A')}")
+        lines.append(f"  Observed power:          {power.get('observed_power', 'N/A')}")
+        lines.append(f"  Current N per group:     {power.get('current_n_per_group', 'N/A')}")
+        if not power.get("adequate_power", True):
+            lines.append(f"  Recommended N per group: {power.get('recommended_n_per_group', 'N/A')}")
+            lines.append(f"  Note: {power.get('power_note', '')}")
+        else:
+            lines.append("  Power is adequate (>= 0.80)")
+        lines.append("")
+
+    lines.append("=" * 64)
+    lines.append("  [Report generated by Python fallback - Ollama not available]")
+    lines.append("=" * 64)
+
+    return "\n".join(lines)
+
+
 def stage3_ai_reporter(stats_results: Dict, proposal_context: str = "",
                        test_type_hint: str = None, progress_callback=None) -> str:
     """
@@ -1171,7 +1556,12 @@ def stage3_ai_reporter(stats_results: Dict, proposal_context: str = "",
 
     Takes proven statistics and generates professional report.
     Uses context to determine correct interpretation (higher/lower = better).
+    Falls back to Python template when Ollama is unavailable.
     """
+    # Check if Ollama is available; if not, use Python fallback
+    if not is_ollama_available():
+        return stage3_python_fallback(stats_results, proposal_context, test_type_hint, progress_callback)
+
     if progress_callback:
         progress_callback("stage3", "Generating Report...")
 
@@ -1233,7 +1623,9 @@ Generate a clear, professional interpretation using the exact statistics above."
     if result["success"]:
         return result["response"]
     else:
-        return f"[Report generation failed: {result.get('error', 'Unknown error')}]"
+        # Fall back to Python template if AI fails
+        print(f"[Agent] AI Reporter failed: {result.get('error')}. Falling back to Python report.")
+        return stage3_python_fallback(stats_results, proposal_context, test_type_hint, progress_callback)
 
 
 def _detect_test_type(context: str, hint: str = None) -> Dict:
