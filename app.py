@@ -73,12 +73,119 @@ def numpy_safe(obj):
     return obj
 
 
+def sanitize_for_json(obj):
+    """Recursively sanitize a data structure so it produces valid JSON.
+
+    Replaces NaN/Inf floats with None, converts numpy types to Python natives.
+    This prevents json.dumps from producing invalid 'NaN' or 'Infinity' tokens
+    that JavaScript JSON.parse cannot handle.
+    """
+    if isinstance(obj, dict):
+        return {k: sanitize_for_json(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [sanitize_for_json(v) for v in obj]
+    if isinstance(obj, tuple):
+        return [sanitize_for_json(v) for v in obj]
+    if isinstance(obj, (np.integer,)):
+        return int(obj)
+    if isinstance(obj, (np.floating,)):
+        v = float(obj)
+        return None if (np.isnan(v) or np.isinf(v)) else v
+    if isinstance(obj, float):
+        return None if (np.isnan(obj) or np.isinf(obj)) else obj
+    if isinstance(obj, np.ndarray):
+        return sanitize_for_json(obj.tolist())
+    if isinstance(obj, (np.bool_,)):
+        return bool(obj)
+    if isinstance(obj, pd.DataFrame):
+        return json.loads(obj.to_json(orient="records"))
+    if isinstance(obj, pd.Series):
+        return json.loads(obj.to_json())
+    return obj
+
+
 class NumpyEncoder(json.JSONEncoder):
     def default(self, obj):
         result = numpy_safe(obj)
         if result is not obj:
             return result
         return super().default(obj)
+
+
+def _format_anova_output(result, anova_type="oneway", data=None):
+    """Format ANOVA result dict into a readable output string."""
+    if "error" in result:
+        return f"Error: {result['error']}"
+
+    lines = []
+    if anova_type == "twoway":
+        return result.get("anova_table_str", json.dumps(result, indent=2))
+
+    depvar = data.get("depvar", "") if data else ""
+    groupvar = data.get("groupvar", "") if data else ""
+    lines.append(f"One-way ANOVA: {depvar} by {groupvar}")
+    lines.append("=" * 60)
+
+    # ANOVA table
+    tbl = result.get("anova_table", {})
+    if tbl:
+        lines.append("")
+        lines.append(f"  {'Source':<22} {'SS':>12} {'df':>6} {'MS':>12} {'F':>10} {'Prob>F':>10}")
+        lines.append("  " + "-" * 56)
+        sources = tbl.get("Source", [])
+        for i, src in enumerate(sources):
+            ss = tbl.get("SS", [""])[i] if i < len(tbl.get("SS", [])) else ""
+            df_val = tbl.get("df", [""])[i] if i < len(tbl.get("df", [])) else ""
+            ms = tbl.get("MS", [""])[i] if i < len(tbl.get("MS", [])) else ""
+            f_val = tbl.get("F", [""])[i] if i < len(tbl.get("F", [])) else ""
+            p_val = tbl.get("Prob > F", [""])[i] if i < len(tbl.get("Prob > F", [])) else ""
+            ss_s = f"{ss:>12.4f}" if isinstance(ss, (int, float)) else f"{ss:>12}"
+            df_s = f"{df_val:>6}" if df_val != "" else f"{'':>6}"
+            ms_s = f"{ms:>12.4f}" if isinstance(ms, (int, float)) else f"{ms:>12}"
+            f_s = f"{f_val:>10.4f}" if isinstance(f_val, (int, float)) else f"{f_val:>10}"
+            p_s = f"{p_val:>10.4f}" if isinstance(p_val, (int, float)) else f"{p_val:>10}"
+            lines.append(f"  {src:<22} {ss_s} {df_s} {ms_s} {f_s} {p_s}")
+        lines.append("  " + "-" * 56)
+
+    # F result
+    f_stat = result.get("F")
+    p_val = result.get("Prob > F")
+    if f_stat is not None:
+        lines.append("")
+        lines.append(f"  F = {f_stat}")
+        lines.append(f"  Prob > F = {p_val}")
+        if p_val is not None:
+            if p_val < 0.001:
+                lines.append("  Result: *** Highly Significant (p < 0.001)")
+            elif p_val < 0.01:
+                lines.append("  Result: ** Very Significant (p < 0.01)")
+            elif p_val < 0.05:
+                lines.append("  Result: * Significant (p < 0.05)")
+            else:
+                lines.append("  Result: Not Significant (p >= 0.05)")
+
+    # Group stats
+    gs_list = result.get("group_stats", [])
+    if gs_list:
+        lines.append("")
+        lines.append(f"  {'Group':<20} {'N':>6} {'Mean':>12} {'Std. Dev.':>12}")
+        lines.append("  " + "-" * 50)
+        for gs in gs_list:
+            lines.append(f"  {str(gs.get('Group', '')):<20} {gs.get('N', ''):>6} {gs.get('Mean', ''):>12.4f} {gs.get('Std. Dev.', ''):>12.4f}")
+        lines.append("  " + "-" * 50)
+
+    # Bartlett's test
+    bart = result.get("bartlett", {})
+    if bart:
+        lines.append("")
+        lines.append(f"  Bartlett's test for equal variances: chi2 = {bart.get('chi2', 'N/A')}, p = {bart.get('p', 'N/A')}")
+
+    # Levene's test
+    lev = result.get("levene", {})
+    if lev:
+        lines.append(f"  Levene's test for equal variances: F = {lev.get('F', 'N/A')}, p = {lev.get('p', 'N/A')}")
+
+    return "\n".join(lines)
 
 
 app.json_encoder = NumpyEncoder
@@ -165,7 +272,7 @@ def upload_file():
             "columns": df.columns.tolist(),
             "dtypes": {str(col): str(dtype) for col, dtype in df.dtypes.items()},
             "preview": json.loads(df.head(20).to_json(orient="records")),
-            "data_info": json.loads(json.dumps(data_info, default=numpy_safe)),
+            "data_info": sanitize_for_json(data_info),
             "message": f"Successfully loaded {filename}: {df.shape[0]} observations, {df.shape[1]} variables",
         })
     except Exception as e:
@@ -206,7 +313,7 @@ def data_info():
         return jsonify({"error": "No dataset loaded"}), 400
 
     info = ai_brain.analyze_data_structure(df)
-    return jsonify(json.loads(json.dumps(info, default=numpy_safe)))
+    return jsonify(sanitize_for_json(info))
 
 
 @app.route("/api/data/variables")
@@ -280,7 +387,7 @@ def run_ttest():
         result = se.ttest_two_sample(df, data["variable"], data["groupvar"], equal_var)
         log_command(f"ttest {data['variable']}, by({data['groupvar']})")
 
-    return jsonify({"result": json.loads(json.dumps(result, default=numpy_safe))})
+    return jsonify({"result": sanitize_for_json(result)})
 
 
 @app.route("/api/stats/anova", methods=["POST"])
@@ -299,7 +406,12 @@ def run_anova():
         result = se.oneway_anova(df, data["depvar"], data["groupvar"])
         log_command(f"oneway {data['depvar']} {data['groupvar']}")
 
-    return jsonify({"result": json.loads(json.dumps(result, default=numpy_safe))})
+    # Format output string for display
+    safe_result = sanitize_for_json(result)
+    output_str = _format_anova_output(safe_result, anova_type, data)
+    safe_result["output"] = output_str
+
+    return jsonify({"result": safe_result})
 
 
 @app.route("/api/stats/chi_square", methods=["POST"])
@@ -310,7 +422,7 @@ def run_chi_square():
     data = request.json
     result = se.chi_square_test(df, data["var1"], data["var2"])
     log_command(f"tabulate {data['var1']} {data['var2']}, chi2")
-    return jsonify({"result": json.loads(json.dumps(result, default=numpy_safe))})
+    return jsonify({"result": sanitize_for_json(result)})
 
 
 @app.route("/api/stats/regression", methods=["POST"])
@@ -335,7 +447,7 @@ def run_regression():
             cmd += ", vce(robust)"
         log_command(cmd)
 
-    return jsonify({"result": json.loads(json.dumps(result, default=numpy_safe))})
+    return jsonify({"result": sanitize_for_json(result)})
 
 
 @app.route("/api/stats/nonparametric", methods=["POST"])
@@ -358,7 +470,7 @@ def run_nonparametric():
     else:
         return jsonify({"error": f"Unknown test: {test_type}"}), 400
 
-    return jsonify({"result": json.loads(json.dumps(result, default=numpy_safe))})
+    return jsonify({"result": sanitize_for_json(result)})
 
 
 @app.route("/api/stats/correlation", methods=["POST"])
@@ -373,7 +485,7 @@ def run_correlation():
         variables = df.select_dtypes(include=[np.number]).columns.tolist()
     result = se.correlation_matrix(df, variables, method)
     log_command(f"{'pwcorr' if method == 'pearson' else 'spearman'} {' '.join(variables)}")
-    return jsonify({"result": json.loads(json.dumps(result, default=numpy_safe))})
+    return jsonify({"result": sanitize_for_json(result)})
 
 
 @app.route("/api/stats/survival", methods=["POST"])
@@ -392,7 +504,7 @@ def run_survival():
                                  data.get("group_var"))
         log_command(f"sts test {data.get('group_var', '')}")
 
-    return jsonify({"result": json.loads(json.dumps(result, default=numpy_safe))})
+    return jsonify({"result": sanitize_for_json(result)})
 
 
 @app.route("/api/stats/power", methods=["POST"])
@@ -411,7 +523,7 @@ def run_power():
         return jsonify({"error": f"Unknown power test: {test_type}"}), 400
 
     log_command(f"power {test_type}")
-    return jsonify({"result": json.loads(json.dumps(result, default=numpy_safe))})
+    return jsonify({"result": sanitize_for_json(result)})
 
 
 @app.route("/api/stats/sample_size", methods=["POST"])
@@ -419,7 +531,7 @@ def run_sample_size():
     data = request.json
     result = ai_brain.calculate_sample_size(data)
     log_command("power (sample size calculation)")
-    return jsonify({"result": json.loads(json.dumps(result, default=numpy_safe))})
+    return jsonify({"result": sanitize_for_json(result)})
 
 
 @app.route("/api/stats/smart_analyze", methods=["POST"])
@@ -438,7 +550,7 @@ def run_smart_analyze():
 
     result = se.run_smart_analysis(df, selected_columns, subject_var, alpha)
     log_command(f"smart analyze {' '.join(selected_columns)}")
-    return jsonify({"result": json.loads(json.dumps(result, default=numpy_safe))})
+    return jsonify({"result": sanitize_for_json(result)})
 
 
 @app.route("/api/stats/fisher_exact", methods=["POST"])
@@ -450,7 +562,7 @@ def run_fisher_exact():
     data = request.json
     result = se.fisher_exact_test(df, data["var1"], data["var2"])
     log_command(f"tabulate {data['var1']} {data['var2']}, exact")
-    return jsonify({"result": json.loads(json.dumps(result, default=numpy_safe))})
+    return jsonify({"result": sanitize_for_json(result)})
 
 
 @app.route("/api/stats/repeated_measures", methods=["POST"])
@@ -474,7 +586,7 @@ def run_repeated_measures():
         result = se.repeated_measures_anova(df, subject_var, within_vars)
         log_command(f"anova repeated {' '.join(within_vars)}, repeated({subject_var})")
 
-    return jsonify({"result": json.loads(json.dumps(result, default=numpy_safe))})
+    return jsonify({"result": sanitize_for_json(result)})
 
 
 @app.route("/api/stats/posthoc", methods=["POST"])
@@ -498,7 +610,7 @@ def run_posthoc():
         result = se.tukey_hsd(df, depvar, groupvar)
         log_command(f"oneway {depvar} {groupvar}, tukey")
 
-    return jsonify({"result": json.loads(json.dumps(result, default=numpy_safe))})
+    return jsonify({"result": sanitize_for_json(result)})
 
 
 # ---------------------------------------------------------------------------
@@ -521,7 +633,7 @@ def ai_analyze():
         result = ai_brain.analyze_data(df, proposal, question, do_research)
         log_command(f"ai analyze" + (f' "{question[:50]}"' if question else ""))
         return jsonify({
-            "result": json.loads(json.dumps(result, default=numpy_safe)),
+            "result": sanitize_for_json(result),
         })
     except Exception as e:
         return jsonify({"error": str(e), "traceback": traceback.format_exc()}), 500
@@ -542,7 +654,7 @@ def ai_suggest():
 
     return jsonify({
         "suggestions": suggestions,
-        "data_info": json.loads(json.dumps(data_info, default=numpy_safe)),
+        "data_info": sanitize_for_json(data_info),
     })
 
 
@@ -616,7 +728,7 @@ def sample_size_from_text():
 
     result = ai_brain.calculate_sample_size_from_text(text, alpha, power)
     log_command("sample size from text")
-    return jsonify({"result": json.loads(json.dumps(result, default=numpy_safe))})
+    return jsonify({"result": sanitize_for_json(result)})
 
 
 # ---------------------------------------------------------------------------
@@ -666,7 +778,7 @@ def analyze_messy_data():
     try:
         result = agent_core.run_messy_data_analysis(raw_text, context)
         log_command("agent messy_data")
-        return jsonify({"result": json.loads(json.dumps(result, default=numpy_safe))})
+        return jsonify({"result": sanitize_for_json(result)})
     except Exception as e:
         return jsonify({"error": str(e), "traceback": traceback.format_exc()}), 500
 
@@ -686,7 +798,7 @@ def sample_size_auto():
     try:
         result = agent_core.search_for_sample_size_data(topic)
         log_command(f'agent sample_size_auto "{topic[:50]}"')
-        return jsonify({"result": json.loads(json.dumps(result, default=numpy_safe))})
+        return jsonify({"result": sanitize_for_json(result)})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -702,7 +814,7 @@ def sample_size_manual():
 
     result = agent_core.calculate_sample_size_manual(effect_size, alpha, power, test_type)
     log_command("agent sample_size_manual")
-    return jsonify({"result": json.loads(json.dumps(result, default=numpy_safe))})
+    return jsonify({"result": sanitize_for_json(result)})
 
 
 @app.route("/api/agent/literature_review", methods=["POST"])
@@ -723,7 +835,7 @@ def literature_review():
     try:
         result = agent_core.generate_literature_review(topic, context)
         log_command(f'agent literature_review "{topic[:50]}"')
-        return jsonify({"result": json.loads(json.dumps(result, default=numpy_safe))})
+        return jsonify({"result": sanitize_for_json(result)})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -794,7 +906,7 @@ def universal_analyze():
     try:
         result = agent_core.run_universal_analysis(raw_text, proposal_context, test_type_hint)
         log_command("agent universal_analyze")
-        return jsonify({"result": json.loads(json.dumps(result, default=numpy_safe))})
+        return jsonify({"result": sanitize_for_json(result)})
     except Exception as e:
         return jsonify({"error": str(e), "traceback": traceback.format_exc()}), 500
 
@@ -843,7 +955,7 @@ def universal_analyze_file():
         result = agent_core.run_universal_analysis(raw_text, proposal_context, test_type_hint)
         log_command(f"agent universal_analyze_file {filename}")
 
-        return jsonify({"result": json.loads(json.dumps(result, default=numpy_safe)), "filename": filename})
+        return jsonify({"result": sanitize_for_json(result), "filename": filename})
 
     except Exception as e:
         return jsonify({"error": str(e), "traceback": traceback.format_exc()}), 500
@@ -870,7 +982,7 @@ def execute_command():
 
     try:
         result = parse_and_execute(cmd, df)
-        return jsonify({"result": json.loads(json.dumps(result, default=numpy_safe))})
+        return jsonify({"result": sanitize_for_json(result)})
     except Exception as e:
         return jsonify({"error": str(e)}), 400
 
