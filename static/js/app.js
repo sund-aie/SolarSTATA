@@ -1357,15 +1357,21 @@ async function loadAvailableModels() {
                 status.style.background = "var(--accent-green)";
                 status.title = "Ollama running";
             } else {
-                status.style.background = "var(--accent-red)";
-                status.title = "Ollama not running";
+                status.style.background = "var(--accent-yellow)";
+                status.title = "Ollama not available - Python fallback active";
             }
+        }
+
+        // Show fallback mode indicator
+        const fallbackBanner = document.getElementById("fallback-mode-banner");
+        if (fallbackBanner) {
+            fallbackBanner.style.display = data.fallback_mode ? "block" : "none";
         }
     } catch (err) {
         const status = document.getElementById("ollama-status");
         if (status) {
-            status.style.background = "var(--accent-red)";
-            status.title = "Cannot connect to Ollama";
+            status.style.background = "var(--accent-yellow)";
+            status.title = "Ollama not available - Python fallback active";
         }
     }
 }
@@ -1856,8 +1862,8 @@ async function runUniversalAnalysis() {
     if (analyzeBtn) analyzeBtn.disabled = true;
 
     switchTab("output");
-    appendOutput("command", "agent universal_analyze", ">>> Running 3-Stage Pipeline Analysis...\n    Stage 1: AI Data Organizer\n    Stage 2: Python Calculator (ANOVA + Tukey + Power)\n    Stage 3: AI Reporter");
-    setStatus("loading", "Stage 1: AI organizing data...");
+    appendOutput("command", "agent universal_analyze", ">>> Running 3-Stage Pipeline Analysis...\n    Stage 1: Data Organizer (AI or Python fallback)\n    Stage 2: Python Calculator (ANOVA + Tukey + Power)\n    Stage 3: Reporter (AI or Python fallback)");
+    setStatus("loading", "Stage 1: Organizing data...");
 
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 300000); // 5 minutes
@@ -1964,10 +1970,16 @@ async function runUniversalAnalysis() {
             if (stats.descriptive) {
                 output += "  DESCRIPTIVE STATISTICS\n";
                 output += "  " + "-".repeat(50) + "\n";
-                output += "  Group".padEnd(20) + "N".padStart(6) + "Mean".padStart(10) + "SD".padStart(10) + "95% CI\n";
-                output += "  " + "-".repeat(50) + "\n";
+                output += "  Group".padEnd(20) + "N".padStart(6) + "Mean".padStart(10) + "SD".padStart(10) + "   95% CI\n";
+                output += "  " + "-".repeat(56) + "\n";
                 Object.entries(stats.descriptive).forEach(([group, d]) => {
-                    output += `  ${group.padEnd(18)} ${String(d.n).padStart(6)} ${d.mean.toFixed(3).padStart(10)} ${d.std.toFixed(3).padStart(10)} [${d.ci_95_lower.toFixed(2)}, ${d.ci_95_upper.toFixed(2)}]\n`;
+                    let ciStr = "N/A";
+                    if (Array.isArray(d.ci_95) && d.ci_95.length === 2) {
+                        ciStr = `[${d.ci_95[0].toFixed(2)}, ${d.ci_95[1].toFixed(2)}]`;
+                    } else if (d.ci_95_lower != null && d.ci_95_upper != null) {
+                        ciStr = `[${d.ci_95_lower.toFixed(2)}, ${d.ci_95_upper.toFixed(2)}]`;
+                    }
+                    output += `  ${group.padEnd(18)} ${String(d.n).padStart(6)} ${d.mean.toFixed(3).padStart(10)} ${d.std.toFixed(3).padStart(10)}   ${ciStr}\n`;
                 });
                 output += "\n";
             }
@@ -1980,12 +1992,12 @@ async function runUniversalAnalysis() {
                 output += `  p-value: ${stats.anova.p_value}`;
                 if (stats.anova.significant) {
                     output += " ***\n";
-                    output += `  Result: SIGNIFICANT (p < ${stats.anova.alpha})\n`;
+                    output += `  Result: SIGNIFICANT (p < ${stats.anova.alpha || 0.05})\n`;
                 } else {
                     output += "\n";
-                    output += `  Result: Not significant (p >= ${stats.anova.alpha})\n`;
+                    output += `  Result: Not significant (p >= ${stats.anova.alpha || 0.05})\n`;
                 }
-                output += `  Groups: ${stats.anova.n_groups}, Total N: ${stats.anova.total_n}\n\n`;
+                output += `  Conclusion: ${stats.anova.conclusion || ""}\n\n`;
             }
 
             // Post-hoc Tukey
@@ -1999,6 +2011,24 @@ async function runUniversalAnalysis() {
                     const sig = c.significant ? " ***" : "";
                     output += `  ${comp.padEnd(28)} ${c.mean_diff.toFixed(3).padStart(10)} ${c.p_adj.toFixed(6).padStart(12)}${sig}\n`;
                 });
+                output += "\n";
+            }
+
+            // Power Analysis
+            if (stats.power_analysis && !stats.power_analysis.error) {
+                const pa = stats.power_analysis;
+                output += "  POWER ANALYSIS\n";
+                output += "  " + "-".repeat(40) + "\n";
+                output += `  Effect size (Cohen's f): ${pa.effect_size_f}\n`;
+                output += `  Effect interpretation:   ${pa.effect_interpretation}\n`;
+                output += `  Observed power:          ${pa.observed_power}\n`;
+                output += `  Current N per group:     ${pa.current_n_per_group}\n`;
+                if (!pa.adequate_power) {
+                    output += `  Recommended N per group: ${pa.recommended_n_per_group}\n`;
+                    output += `  Note: ${pa.power_note}\n`;
+                } else {
+                    output += "  Power is adequate (>= 0.80)\n";
+                }
                 output += "\n";
             }
         }

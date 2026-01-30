@@ -741,14 +741,27 @@ def get_agent_models():
     try:
         models = agent_core.get_available_models()
         current = agent_core.get_model()
-        is_running = agent_core.check_ollama_running()
+        is_running = agent_core.is_ollama_available()
         return jsonify({
             "models": models,
             "current": current,
-            "ollama_running": is_running
+            "ollama_running": is_running,
+            "fallback_mode": not is_running
         })
     except Exception as e:
-        return jsonify({"error": str(e), "models": ["llama3.2"], "current": "llama3.2", "ollama_running": False})
+        return jsonify({"error": str(e), "models": ["llama3.2"], "current": "llama3.2", "ollama_running": False, "fallback_mode": True})
+
+
+@app.route("/api/agent/ollama_status")
+def ollama_status():
+    """Check Ollama availability and report fallback status."""
+    agent_core.reset_ollama_check()  # Force fresh check
+    available = agent_core.is_ollama_available()
+    return jsonify({
+        "available": available,
+        "fallback_mode": not available,
+        "message": "Ollama is running" if available else "Ollama not available - using Python fallbacks for data parsing and report generation. Statistics (Stage 2) are unaffected."
+    })
 
 
 @app.route("/api/agent/models", methods=["POST"])
