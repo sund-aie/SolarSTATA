@@ -1,100 +1,84 @@
 """
-SolarSTATA - AI-Powered Statistical Analysis Application
-Flask web server providing a Stata 19-like interface with integrated AI.
+SolarSTATA — Flask Application Server
+
+Routes:
+  /                          → main page
+  /api/upload                → upload CSV/Excel
+  /api/data/preview          → preview loaded data
+  /api/data/columns          → list columns & types
+  /api/stats/<test>          → run a statistical test
+  /api/agent/*               → AI agent endpoints
+  /api/health                → health-check
 """
 
-import os
-import json
-import traceback
-import pandas as pd
+import os, json, traceback
 import numpy as np
-from flask import Flask, render_template, request, jsonify, session
-from werkzeug.utils import secure_filename
+import pandas as pd
+from flask import Flask, request, jsonify, render_template
 
 import stats_engine as se
-import ai_brain
-import agent_core
 
+# Lazy-import heavy modules so startup is fast
+_ai_brain = None
+_agent_core = None
+
+def _brain():
+    global _ai_brain
+    if _ai_brain is None:
+        import ai_brain; _ai_brain = ai_brain
+    return _ai_brain
+
+def _agent():
+    global _agent_core
+    if _agent_core is None:
+        import agent_core; _agent_core = agent_core
+    return _agent_core
+
+# ---------------------------------------------------------------------------
+# Flask app
+# ---------------------------------------------------------------------------
 app = Flask(__name__)
-app.secret_key = os.urandom(24)
-app.config["UPLOAD_FOLDER"] = os.path.join(os.path.dirname(__file__), "uploads")
-app.config["MAX_CONTENT_LENGTH"] = 50 * 1024 * 1024  # 50MB max
+app.config["MAX_CONTENT_LENGTH"] = 50 * 1024 * 1024  # 50 MB
+UPLOAD_DIR = os.path.join(os.path.dirname(__file__), "uploads")
+os.makedirs(UPLOAD_DIR, exist_ok=True)
 
-os.makedirs(app.config["UPLOAD_FOLDER"], exist_ok=True)
-
-# In-memory dataset storage (per-session simulation)
-datasets = {}
-command_history = []
-results_log = []
-
-ALLOWED_EXTENSIONS = {"csv", "xlsx", "xls", "dta", "tsv", "txt"}
+# ---------------------------------------------------------------------------
+# In-memory data store (single-user)
+# ---------------------------------------------------------------------------
+_store = {"df": None, "filename": None, "columns": [], "dtypes": {}}
 
 
-def allowed_file(filename):
-    return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
+def _set_data(df, filename):
+    _store["df"] = df
+    _store["filename"] = filename
+    _store["columns"] = list(df.columns)
+    _store["dtypes"] = {str(c): str(df[c].dtype) for c in df.columns}
 
 
-def get_current_df():
-    """Get the currently loaded dataframe."""
-    return datasets.get("current")
+def _get_df():
+    return _store["df"]
 
 
-def set_current_df(df, name="current"):
-    """Store a dataframe."""
-    datasets[name] = df
-
-
-def log_command(cmd, result_summary=""):
-    """Log a command to history (Stata-style)."""
-    command_history.append({"command": cmd, "result": result_summary})
-
-
-def numpy_safe(obj):
-    """Convert numpy types to Python native types for JSON serialization."""
-    if isinstance(obj, (np.integer,)):
-        return int(obj)
-    if isinstance(obj, (np.floating,)):
-        v = float(obj)
-        if np.isnan(v) or np.isinf(v):
-            return None
-        return v
-    if isinstance(obj, float):
-        if np.isnan(obj) or np.isinf(obj):
-            return None
-        return obj
-    if isinstance(obj, np.ndarray):
-        return obj.tolist()
-    if isinstance(obj, pd.DataFrame):
-        return json.loads(obj.to_json(orient="records"))
-    if isinstance(obj, pd.Series):
-        return json.loads(obj.to_json())
-    if isinstance(obj, (np.bool_,)):
-        return bool(obj)
-    return obj
-
-
-def sanitize_for_json(obj):
-    """Recursively sanitize a data structure so it produces valid JSON.
-
-    Replaces NaN/Inf floats with None, converts numpy types to Python natives.
-    This prevents json.dumps from producing invalid 'NaN' or 'Infinity' tokens
-    that JavaScript JSON.parse cannot handle.
-    """
+# ---------------------------------------------------------------------------
+# JSON safety — converts NaN / Inf / numpy types to JSON-safe values
+# ---------------------------------------------------------------------------
+def _safe(obj):
+    """Recursively sanitise an object for JSON serialisation."""
     if isinstance(obj, dict):
-        return {k: sanitize_for_json(v) for k, v in obj.items()}
-    if isinstance(obj, list):
-        return [sanitize_for_json(v) for v in obj]
-    if isinstance(obj, tuple):
-        return [sanitize_for_json(v) for v in obj]
+        return {k: _safe(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_safe(v) for v in obj]
     if isinstance(obj, (np.integer,)):
         return int(obj)
     if isinstance(obj, (np.floating,)):
         v = float(obj)
         return None if (np.isnan(v) or np.isinf(v)) else v
     if isinstance(obj, float):
-        return None if (np.isnan(obj) or np.isinf(obj)) else obj
+        if np.isnan(obj) or np.isinf(obj):
+            return None
+        return obj
     if isinstance(obj, np.ndarray):
-        return sanitize_for_json(obj.tolist())
+        return _safe(obj.tolist())
     if isinstance(obj, (np.bool_,)):
         return bool(obj)
     if isinstance(obj, pd.DataFrame):
@@ -104,95 +88,62 @@ def sanitize_for_json(obj):
     return obj
 
 
-class NumpyEncoder(json.JSONEncoder):
-    def default(self, obj):
-        result = numpy_safe(obj)
-        if result is not obj:
-            return result
-        return super().default(obj)
+def _ok(result):
+    """Wrap a result dict in a JSON response with sanitisation."""
+    return jsonify({"result": _safe(result)})
 
 
-def _format_anova_output(result, anova_type="oneway", data=None):
-    """Format ANOVA result dict into a readable output string."""
-    if "error" in result:
-        return f"Error: {result['error']}"
-
-    lines = []
-    if anova_type == "twoway":
-        return result.get("anova_table_str", json.dumps(result, indent=2))
-
-    depvar = data.get("depvar", "") if data else ""
-    groupvar = data.get("groupvar", "") if data else ""
-    lines.append(f"One-way ANOVA: {depvar} by {groupvar}")
-    lines.append("=" * 60)
-
-    # ANOVA table
-    tbl = result.get("anova_table", {})
-    if tbl:
-        lines.append("")
-        lines.append(f"  {'Source':<22} {'SS':>12} {'df':>6} {'MS':>12} {'F':>10} {'Prob>F':>10}")
-        lines.append("  " + "-" * 56)
-        sources = tbl.get("Source", [])
-        for i, src in enumerate(sources):
-            ss = tbl.get("SS", [""])[i] if i < len(tbl.get("SS", [])) else ""
-            df_val = tbl.get("df", [""])[i] if i < len(tbl.get("df", [])) else ""
-            ms = tbl.get("MS", [""])[i] if i < len(tbl.get("MS", [])) else ""
-            f_val = tbl.get("F", [""])[i] if i < len(tbl.get("F", [])) else ""
-            p_val = tbl.get("Prob > F", [""])[i] if i < len(tbl.get("Prob > F", [])) else ""
-            ss_s = f"{ss:>12.4f}" if isinstance(ss, (int, float)) else f"{ss:>12}"
-            df_s = f"{df_val:>6}" if df_val != "" else f"{'':>6}"
-            ms_s = f"{ms:>12.4f}" if isinstance(ms, (int, float)) else f"{ms:>12}"
-            f_s = f"{f_val:>10.4f}" if isinstance(f_val, (int, float)) else f"{f_val:>10}"
-            p_s = f"{p_val:>10.4f}" if isinstance(p_val, (int, float)) else f"{p_val:>10}"
-            lines.append(f"  {src:<22} {ss_s} {df_s} {ms_s} {f_s} {p_s}")
-        lines.append("  " + "-" * 56)
-
-    # F result
-    f_stat = result.get("F")
-    p_val = result.get("Prob > F")
-    if f_stat is not None:
-        lines.append("")
-        lines.append(f"  F = {f_stat}")
-        lines.append(f"  Prob > F = {p_val}")
-        if p_val is not None:
-            if p_val < 0.001:
-                lines.append("  Result: *** Highly Significant (p < 0.001)")
-            elif p_val < 0.01:
-                lines.append("  Result: ** Very Significant (p < 0.01)")
-            elif p_val < 0.05:
-                lines.append("  Result: * Significant (p < 0.05)")
-            else:
-                lines.append("  Result: Not Significant (p >= 0.05)")
-
-    # Group stats
-    gs_list = result.get("group_stats", [])
-    if gs_list:
-        lines.append("")
-        lines.append(f"  {'Group':<20} {'N':>6} {'Mean':>12} {'Std. Dev.':>12}")
-        lines.append("  " + "-" * 50)
-        for gs in gs_list:
-            lines.append(f"  {str(gs.get('Group', '')):<20} {gs.get('N', ''):>6} {gs.get('Mean', ''):>12.4f} {gs.get('Std. Dev.', ''):>12.4f}")
-        lines.append("  " + "-" * 50)
-
-    # Bartlett's test
-    bart = result.get("bartlett", {})
-    if bart:
-        lines.append("")
-        lines.append(f"  Bartlett's test for equal variances: chi2 = {bart.get('chi2', 'N/A')}, p = {bart.get('p', 'N/A')}")
-
-    # Levene's test
-    lev = result.get("levene", {})
-    if lev:
-        lines.append(f"  Levene's test for equal variances: F = {lev.get('F', 'N/A')}, p = {lev.get('p', 'N/A')}")
-
-    return "\n".join(lines)
-
-
-app.json_encoder = NumpyEncoder
+def _err(msg, code=400):
+    return jsonify({"error": str(msg)}), code
 
 
 # ---------------------------------------------------------------------------
-# ROUTES
+# Format helpers — produce Stata-style plain-text output strings
+# ---------------------------------------------------------------------------
+
+def _fmt_anova(r):
+    """Format one-way ANOVA result as Stata-style table."""
+    lines = []
+    lines.append("                        Analysis of Variance")
+    lines.append(f"    Source              SS         df      MS            F     Prob > F")
+    lines.append("  " + "-" * 68)
+    at = r.get("anova_table", {})
+    src = at.get("Source", [])
+    ss = at.get("SS", [])
+    df_vals = at.get("df", [])
+    ms = at.get("MS", [])
+    fv = at.get("F", [])
+    pv = at.get("Prob", [])
+    for i in range(len(src)):
+        s = f"    {str(src[i]):<18}"
+        s += f" {str(ss[i]):>10}" if ss[i] != "" else " " * 11
+        s += f" {str(df_vals[i]):>6}" if df_vals[i] != "" else " " * 7
+        s += f" {str(ms[i]):>12}" if ms[i] != "" else " " * 13
+        s += f" {str(fv[i]):>10}" if fv[i] != "" else " " * 11
+        s += f" {str(pv[i]):>10}" if pv[i] != "" else " " * 11
+        lines.append(s)
+    lines.append("")
+    p = r.get("p")
+    if p is not None:
+        sig = "***" if p < 0.001 else "**" if p < 0.01 else "*" if p < 0.05 else ""
+        lines.append(f"    F({at['df'][0] if at.get('df') else '?'}, "
+                     f"{at['df'][1] if at.get('df') and len(at['df'])>1 else '?'}) = "
+                     f"{r.get('F', '?')}    Prob > F = {p} {sig}")
+    lines.append("")
+    for gs in r.get("group_stats", []):
+        lines.append(f"    {gs['Group']:<20}  N={gs['N']}  Mean={gs['Mean']}  SD={gs['SD']}")
+    lines.append("")
+    b = r.get("bartlett", {})
+    l = r.get("levene", {})
+    if b:
+        lines.append(f"    Bartlett's test:  chi2 = {b.get('chi2','?')}  Prob>chi2 = {b.get('p','?')}")
+    if l:
+        lines.append(f"    Levene's test:   F = {l.get('F','?')}  Prob>F = {l.get('p','?')}")
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# ROUTES — main page
 # ---------------------------------------------------------------------------
 
 @app.route("/")
@@ -200,1058 +151,638 @@ def index():
     return render_template("index.html")
 
 
+# ---------------------------------------------------------------------------
+# ROUTES — file upload & data
+# ---------------------------------------------------------------------------
+
 @app.route("/api/upload", methods=["POST"])
-def upload_file():
-    """Upload and parse a data file."""
-    if "file" not in request.files:
-        return jsonify({"error": "No file provided"}), 400
-
-    file = request.files["file"]
-    if file.filename == "":
-        return jsonify({"error": "No file selected"}), 400
-
-    if not allowed_file(file.filename):
-        return jsonify({"error": f"Unsupported file type. Allowed: {', '.join(ALLOWED_EXTENSIONS)}"}), 400
-
-    filename = secure_filename(file.filename)
-    filepath = os.path.join(app.config["UPLOAD_FOLDER"], filename)
-    file.save(filepath)
-
+def upload():
+    f = request.files.get("file")
+    if not f or not f.filename:
+        return _err("No file provided")
+    fname = f.filename.lower()
+    path = os.path.join(UPLOAD_DIR, f.filename)
+    f.save(path)
     try:
-        ext = filename.rsplit(".", 1)[1].lower()
-        if ext == "csv":
-            df = pd.read_csv(filepath)
-        elif ext == "tsv" or ext == "txt":
-            df = pd.read_csv(filepath, sep="\t")
-        elif ext in ("xlsx", "xls"):
-            df = pd.read_excel(filepath, header=None)
-            # Flatten: read without header so merged cells don't create MultiIndex
-        elif ext == "dta":
-            df = pd.read_stata(filepath)
+        if fname.endswith(".csv"):
+            df = pd.read_csv(path)
+        elif fname.endswith((".xlsx", ".xls")):
+            df = pd.read_excel(path)
+        elif fname.endswith(".dta"):
+            df = pd.read_stata(path)
         else:
-            return jsonify({"error": "Unsupported format"}), 400
-
-        # Smart clean
+            return _err("Unsupported format. Use CSV, Excel, or Stata (.dta)")
+        # Clean data
         try:
-            df = ai_brain.smart_clean(df)
+            df = _brain().smart_clean(df)
         except Exception:
-            # Fallback: basic cleaning if smart_clean fails
-            if isinstance(df.columns, pd.MultiIndex):
-                df.columns = [str(c) for c in df.columns]
-            df.columns = [str(c) for c in df.columns]
-
-        # Ensure all column names are strings and unique
-        cols = list(df.columns)
-        seen = {}
-        new_cols = []
-        for c in cols:
-            c = str(c)
-            if c in seen:
-                seen[c] += 1
-                new_cols.append(f"{c}_{seen[c]}")
-            else:
-                seen[c] = 0
-                new_cols.append(c)
-        df.columns = new_cols
-
-        set_current_df(df, "current")
-        set_current_df(df, filename)
-
-        # Analyze structure
-        try:
-            data_info = ai_brain.analyze_data_structure(df)
-        except Exception:
-            data_info = {"n_observations": df.shape[0], "n_variables": df.shape[1]}
-
-        log_command(f'use "{filename}"', f"({df.shape[0]} observations, {df.shape[1]} variables)")
-
-        return jsonify({
-            "success": True,
-            "filename": filename,
-            "shape": list(df.shape),
-            "columns": df.columns.tolist(),
-            "dtypes": {str(col): str(dtype) for col, dtype in df.dtypes.items()},
-            "preview": json.loads(df.head(20).to_json(orient="records")),
-            "data_info": sanitize_for_json(data_info),
-            "message": f"Successfully loaded {filename}: {df.shape[0]} observations, {df.shape[1]} variables",
-        })
+            df = se.clean_data(df)
+        _set_data(df, f.filename)
+        # Build data_info for the frontend
+        var_types = se.detect_variable_types(df)
+        numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+        cat_cols = [c for c in df.columns if c not in numeric_cols]
+        var_info = json.loads(var_types.to_json(orient="records")) if var_types is not None else []
+        group_candidates = [{"column": c, "n_groups": int(df[c].nunique())}
+                            for c in cat_cols if 1 < df[c].nunique() <= 20]
+        missing = {str(c): int(df[c].isnull().sum()) for c in df.columns}
+        data_info = {
+            "variable_info": var_info,
+            "numeric_columns": numeric_cols,
+            "categorical_columns": cat_cols,
+            "group_candidates": group_candidates,
+            "missing_summary": missing,
+        }
+        preview = json.loads(df.head(100).to_json(orient="records"))
+        return jsonify(_safe({
+            "message": f"Loaded {f.filename}: {len(df)} obs, {len(df.columns)} vars",
+            "rows": len(df),
+            "columns": list(df.columns),
+            "dtypes": {str(c): str(df[c].dtype) for c in df.columns},
+            "filename": f.filename,
+            "shape": [len(df), len(df.columns)],
+            "data_info": data_info,
+            "preview": preview,
+        }))
     except Exception as e:
-        return jsonify({"error": f"Failed to read file: {str(e)}"}), 400
-    finally:
-        if os.path.exists(filepath):
-            os.remove(filepath)
+        return _err(f"Failed to read file: {e}")
 
 
 @app.route("/api/data/preview")
 def data_preview():
-    """Get current dataset preview."""
-    df = get_current_df()
+    df = _get_df()
     if df is None:
-        return jsonify({"error": "No dataset loaded. Use File > Open to load data."}), 400
-
-    page = request.args.get("page", 1, type=int)
-    per_page = request.args.get("per_page", 50, type=int)
-    start = (page - 1) * per_page
-    end = start + per_page
-
-    return jsonify({
-        "data": json.loads(df.iloc[start:end].to_json(orient="records")),
-        "total_rows": len(df),
-        "total_cols": len(df.columns),
-        "columns": df.columns.tolist(),
-        "page": page,
-        "per_page": per_page,
-        "total_pages": (len(df) + per_page - 1) // per_page,
-    })
+        return _err("No data loaded")
+    n = min(int(request.args.get("n", 100)), len(df))
+    return jsonify({"columns": list(df.columns),
+                    "rows": json.loads(df.head(n).to_json(orient="records")),
+                    "total_rows": len(df), "shown": n})
 
 
-@app.route("/api/data/info")
-def data_info():
-    """Get detailed data information (Stata: describe)."""
-    df = get_current_df()
+@app.route("/api/data/columns")
+def data_columns():
+    df = _get_df()
     if df is None:
-        return jsonify({"error": "No dataset loaded"}), 400
-
-    info = ai_brain.analyze_data_structure(df)
-    return jsonify(sanitize_for_json(info))
-
-
-@app.route("/api/data/variables")
-def data_variables():
-    """List all variables and types."""
-    df = get_current_df()
-    if df is None:
-        return jsonify({"error": "No dataset loaded"}), 400
-    var_info = se.detect_variable_types(df)
-    return jsonify(var_info.to_dict("records"))
+        return _err("No data loaded")
+    info = se.detect_variable_types(df)
+    return jsonify({"columns": json.loads(info.to_json(orient="records"))})
 
 
 # ---------------------------------------------------------------------------
-# STATISTICAL TESTS API
+# ROUTES — statistical tests
 # ---------------------------------------------------------------------------
 
 @app.route("/api/stats/descriptive", methods=["POST"])
-def run_descriptive():
-    df = get_current_df()
-    if df is None:
-        return jsonify({"error": "No dataset loaded"}), 400
-    data = request.json or {}
-    variables = data.get("variables")
-    detail = data.get("detail", True)
-    result = se.descriptive_stats(df, variables, detail)
-    log_command(f"summarize {' '.join(variables or df.select_dtypes(include=[np.number]).columns.tolist())}")
-    return jsonify({"result": result.to_dict("records"), "result_str": result.to_string()})
+def stat_descriptive():
+    df = _get_df()
+    if df is None: return _err("No data loaded")
+    d = request.json or {}
+    variables = d.get("variables") or df.select_dtypes(include=[np.number]).columns.tolist()
+    detail = d.get("detail", True)
+    r = se.descriptive(df, variables, detail=detail)
+    return _ok({"table": json.loads(r.to_json(orient="records")),
+                "output": r.to_string(index=False)})
 
 
 @app.route("/api/stats/tabulate", methods=["POST"])
-def run_tabulate():
-    df = get_current_df()
-    if df is None:
-        return jsonify({"error": "No dataset loaded"}), 400
-    data = request.json
-    var1 = data.get("var1")
-    var2 = data.get("var2")
-    result = se.tabulate(df, var1, var2)
-    log_command(f"tabulate {var1}" + (f" {var2}" if var2 else ""))
-    return jsonify({"result": result.to_dict(), "result_str": result.to_string()})
+def stat_tabulate():
+    df = _get_df()
+    if df is None: return _err("No data loaded")
+    d = request.json or {}
+    r = se.tabulate(df, d["var1"], d.get("var2"))
+    return _ok({"table": json.loads(r.to_json(orient="records")), "output": r.to_string()})
 
 
 @app.route("/api/stats/normality", methods=["POST"])
-def run_normality():
-    df = get_current_df()
-    if df is None:
-        return jsonify({"error": "No dataset loaded"}), 400
-    data = request.json
-    variable = data.get("variable")
-    result = se.normality_test(df, variable)
-    log_command(f"sktest {variable}")
-    return jsonify({"result": result})
+def stat_normality():
+    df = _get_df()
+    if df is None: return _err("No data loaded")
+    d = request.json or {}
+    r = se.normality(df, d["variable"])
+    # Normalize keys for frontend
+    r.setdefault("Shapiro_W", r.get("SW_W")); r.setdefault("Shapiro_p", r.get("SW_p"))
+    r.setdefault("normal", (r.get("SW_p") or 1) > 0.05)
+    return _ok(r)
 
 
 @app.route("/api/stats/ttest", methods=["POST"])
-def run_ttest():
-    df = get_current_df()
-    if df is None:
-        return jsonify({"error": "No dataset loaded"}), 400
-    data = request.json
-    test_type = data.get("type", "two_sample")
-
-    if test_type == "one_sample":
-        result = se.ttest_one_sample(df, data["variable"], data.get("mu", 0))
-        log_command(f"ttest {data['variable']} == {data.get('mu', 0)}")
-    elif test_type == "paired":
-        result = se.ttest_paired(df, data["var1"], data["var2"])
-        log_command(f"ttest {data['var1']} == {data['var2']}")
-    else:
-        equal_var = data.get("equal_var", True)
-        result = se.ttest_two_sample(df, data["variable"], data["groupvar"], equal_var)
-        log_command(f"ttest {data['variable']}, by({data['groupvar']})")
-
-    return jsonify({"result": sanitize_for_json(result)})
+def stat_ttest():
+    df = _get_df()
+    if df is None: return _err("No data loaded")
+    d = request.json or {}
+    tt = d.get("type", "two_sample")
+    try:
+        if tt == "one_sample":
+            r = se.ttest_one(df, d["variable"], mu=float(d.get("mu", 0)))
+            r.setdefault("t_stat", r.get("t")); r.setdefault("p", r.get("p_two"))
+        elif tt == "paired":
+            r = se.ttest_paired(df, d["var1"], d["var2"])
+            r.setdefault("t_stat", r.get("t"))
+        else:
+            r = se.ttest_two(df, d["variable"], d["groupvar"])
+            # Add canonical keys from Welch values (preferred)
+            r.setdefault("t_stat", r.get("t_welch") or r.get("t_equal"))
+            r.setdefault("p", r.get("p_welch") or r.get("p_equal"))
+            r.setdefault("df", r.get("df_welch") or r.get("df_equal"))
+        return _ok(r)
+    except Exception as e:
+        return _err(str(e))
 
 
 @app.route("/api/stats/anova", methods=["POST"])
-def run_anova():
-    df = get_current_df()
-    if df is None:
-        return jsonify({"error": "No dataset loaded"}), 400
-    data = request.json
-    anova_type = data.get("type", "oneway")
-
-    if anova_type == "twoway":
-        result = se.twoway_anova(df, data["depvar"], data["factor1"], data["factor2"],
-                                 data.get("interaction", True))
-        log_command(f"anova {data['depvar']} {data['factor1']} {data['factor2']}")
-    else:
-        result = se.oneway_anova(df, data["depvar"], data["groupvar"])
-        log_command(f"oneway {data['depvar']} {data['groupvar']}")
-
-    # Format output string for display
-    safe_result = sanitize_for_json(result)
-    output_str = _format_anova_output(safe_result, anova_type, data)
-    safe_result["output"] = output_str
-
-    return jsonify({"result": safe_result})
+def stat_anova():
+    df = _get_df()
+    if df is None: return _err("No data loaded")
+    d = request.json or {}
+    try:
+        if d.get("type") == "twoway":
+            r = se.twoway_anova(df, d["depvar"], d["factor1"], d["factor2"],
+                                interaction=d.get("interaction", True))
+        else:
+            r = se.oneway_anova(df, d["depvar"], d["groupvar"])
+            r["output"] = _fmt_anova(r)
+        return _ok(r)
+    except Exception as e:
+        return _err(str(e))
 
 
 @app.route("/api/stats/chi_square", methods=["POST"])
-def run_chi_square():
-    df = get_current_df()
-    if df is None:
-        return jsonify({"error": "No dataset loaded"}), 400
-    data = request.json
-    result = se.chi_square_test(df, data["var1"], data["var2"])
-    log_command(f"tabulate {data['var1']} {data['var2']}, chi2")
-    return jsonify({"result": sanitize_for_json(result)})
+def stat_chi_square():
+    df = _get_df()
+    if df is None: return _err("No data loaded")
+    d = request.json or {}
+    try:
+        if d.get("type") == "gof":
+            r = se.chi_square_gof(df, d["variable"])
+        else:
+            r = se.chi_square(df, d["var1"], d["var2"])
+        return _ok(r)
+    except Exception as e:
+        return _err(str(e))
+
+
+@app.route("/api/stats/fisher", methods=["POST"])
+def stat_fisher():
+    df = _get_df()
+    if df is None: return _err("No data loaded")
+    d = request.json or {}
+    try:
+        r = se.fisher_exact(df, d["var1"], d["var2"])
+        return _ok(r)
+    except Exception as e:
+        return _err(str(e))
 
 
 @app.route("/api/stats/regression", methods=["POST"])
-def run_regression():
-    df = get_current_df()
-    if df is None:
-        return jsonify({"error": "No dataset loaded"}), 400
-    data = request.json
-    reg_type = data.get("type", "ols")
-
-    if reg_type == "logistic":
-        result = se.logistic_regression(df, data["depvar"], data["indepvars"])
-        log_command(f"logit {data['depvar']} {' '.join(data['indepvars'])}")
-    elif reg_type == "probit":
-        result = se.probit_regression(df, data["depvar"], data["indepvars"])
-        log_command(f"probit {data['depvar']} {' '.join(data['indepvars'])}")
-    else:
-        robust = data.get("robust", False)
-        result = se.linear_regression(df, data["depvar"], data["indepvars"], robust)
-        cmd = f"regress {data['depvar']} {' '.join(data['indepvars'])}"
-        if robust:
-            cmd += ", vce(robust)"
-        log_command(cmd)
-
-    return jsonify({"result": sanitize_for_json(result)})
+def stat_regression():
+    df = _get_df()
+    if df is None: return _err("No data loaded")
+    d = request.json or {}
+    try:
+        rtype = d.get("type", "ols")
+        if rtype == "logistic":
+            r = se.logistic_regression(df, d["depvar"], d["indepvars"])
+        elif rtype == "probit":
+            r = se.probit_regression(df, d["depvar"], d["indepvars"])
+        else:
+            r = se.ols_regression(df, d["depvar"], d["indepvars"],
+                                  robust=d.get("robust", False))
+        return _ok(r)
+    except Exception as e:
+        return _err(str(e))
 
 
 @app.route("/api/stats/nonparametric", methods=["POST"])
-def run_nonparametric():
-    df = get_current_df()
-    if df is None:
-        return jsonify({"error": "No dataset loaded"}), 400
-    data = request.json
-    test_type = data.get("test", "mann_whitney")
-
-    if test_type == "mann_whitney":
-        result = se.mann_whitney_u(df, data["variable"], data["groupvar"])
-        log_command(f"ranksum {data['variable']}, by({data['groupvar']})")
-    elif test_type == "wilcoxon":
-        result = se.wilcoxon_signed_rank(df, data["var1"], data["var2"])
-        log_command(f"signrank {data['var1']} = {data['var2']}")
-    elif test_type == "kruskal_wallis":
-        result = se.kruskal_wallis(df, data["variable"], data["groupvar"])
-        log_command(f"kwallis {data['variable']}, by({data['groupvar']})")
-    else:
-        return jsonify({"error": f"Unknown test: {test_type}"}), 400
-
-    return jsonify({"result": sanitize_for_json(result)})
+def stat_nonparametric():
+    df = _get_df()
+    if df is None: return _err("No data loaded")
+    d = request.json or {}
+    try:
+        test = d.get("test", "mann_whitney")
+        if test == "mann_whitney":
+            r = se.mann_whitney(df, d["variable"], d["groupvar"])
+        elif test == "wilcoxon":
+            r = se.wilcoxon_signed(df, d["var1"], d["var2"])
+        elif test == "kruskal_wallis":
+            r = se.kruskal_wallis(df, d["variable"], d["groupvar"])
+        else:
+            return _err(f"Unknown nonparametric test: {test}")
+        return _ok(r)
+    except Exception as e:
+        return _err(str(e))
 
 
 @app.route("/api/stats/correlation", methods=["POST"])
-def run_correlation():
-    df = get_current_df()
-    if df is None:
-        return jsonify({"error": "No dataset loaded"}), 400
-    data = request.json
-    method = data.get("method", "pearson")
-    variables = data.get("variables")
-    if not variables:
-        variables = df.select_dtypes(include=[np.number]).columns.tolist()
-    result = se.correlation_matrix(df, variables, method)
-    log_command(f"{'pwcorr' if method == 'pearson' else 'spearman'} {' '.join(variables)}")
-    return jsonify({"result": sanitize_for_json(result)})
-
-
-@app.route("/api/stats/survival", methods=["POST"])
-def run_survival():
-    df = get_current_df()
-    if df is None:
-        return jsonify({"error": "No dataset loaded"}), 400
-    data = request.json
-    analysis_type = data.get("type", "kaplan_meier")
-
-    if analysis_type == "cox":
-        result = se.cox_regression(df, data["time_var"], data["event_var"], data["covariates"])
-        log_command(f"stcox {' '.join(data['covariates'])}")
-    else:
-        result = se.kaplan_meier(df, data["time_var"], data["event_var"],
-                                 data.get("group_var"))
-        log_command(f"sts test {data.get('group_var', '')}")
-
-    return jsonify({"result": sanitize_for_json(result)})
-
-
-@app.route("/api/stats/power", methods=["POST"])
-def run_power():
-    df = get_current_df()
-    data = request.json
-    test_type = data.get("test_type", "ttest")
-
-    if test_type == "ttest":
-        result = se.power_ttest(**{k: v for k, v in data.items() if k != "test_type" and v is not None})
-    elif test_type == "anova":
-        result = se.power_anova(**{k: v for k, v in data.items() if k != "test_type" and v is not None})
-    elif test_type == "chi2":
-        result = se.power_chi2(**{k: v for k, v in data.items() if k != "test_type" and v is not None})
-    else:
-        return jsonify({"error": f"Unknown power test: {test_type}"}), 400
-
-    log_command(f"power {test_type}")
-    return jsonify({"result": sanitize_for_json(result)})
-
-
-@app.route("/api/stats/sample_size", methods=["POST"])
-def run_sample_size():
-    data = request.json
-    result = ai_brain.calculate_sample_size(data)
-    log_command("power (sample size calculation)")
-    return jsonify({"result": sanitize_for_json(result)})
-
-
-@app.route("/api/stats/smart_analyze", methods=["POST"])
-def run_smart_analyze():
-    """Smart Statistical Router - auto-selects appropriate test."""
-    df = get_current_df()
-    if df is None:
-        return jsonify({"error": "No dataset loaded"}), 400
-    data = request.json or {}
-    selected_columns = data.get("columns", [])
-    subject_var = data.get("subject_var")
-    alpha = data.get("alpha", 0.05)
-
-    if not selected_columns:
-        return jsonify({"error": "No columns selected for analysis"}), 400
-
-    result = se.run_smart_analysis(df, selected_columns, subject_var, alpha)
-    log_command(f"smart analyze {' '.join(selected_columns)}")
-    return jsonify({"result": sanitize_for_json(result)})
-
-
-@app.route("/api/stats/fisher_exact", methods=["POST"])
-def run_fisher_exact():
-    """Fisher's Exact Test for 2x2 tables."""
-    df = get_current_df()
-    if df is None:
-        return jsonify({"error": "No dataset loaded"}), 400
-    data = request.json
-    result = se.fisher_exact_test(df, data["var1"], data["var2"])
-    log_command(f"tabulate {data['var1']} {data['var2']}, exact")
-    return jsonify({"result": sanitize_for_json(result)})
-
-
-@app.route("/api/stats/repeated_measures", methods=["POST"])
-def run_repeated_measures():
-    """Repeated Measures ANOVA or Friedman Test."""
-    df = get_current_df()
-    if df is None:
-        return jsonify({"error": "No dataset loaded"}), 400
-    data = request.json
-    test_type = data.get("type", "anova")
-    subject_var = data.get("subject_var")
-    within_vars = data.get("within_vars", [])
-
-    if not subject_var or not within_vars:
-        return jsonify({"error": "Requires subject_var and within_vars"}), 400
-
-    if test_type == "friedman":
-        result = se.friedman_test(df, subject_var, within_vars)
-        log_command(f"friedman {' '.join(within_vars)}, id({subject_var})")
-    else:
-        result = se.repeated_measures_anova(df, subject_var, within_vars)
-        log_command(f"anova repeated {' '.join(within_vars)}, repeated({subject_var})")
-
-    return jsonify({"result": sanitize_for_json(result)})
+def stat_correlation():
+    df = _get_df()
+    if df is None: return _err("No data loaded")
+    d = request.json or {}
+    try:
+        r = se.correlation(df, d["variables"], method=d.get("method", "pearson"))
+        return _ok(r)
+    except Exception as e:
+        return _err(str(e))
 
 
 @app.route("/api/stats/posthoc", methods=["POST"])
-def run_posthoc():
-    """Post-hoc tests (Tukey HSD or Bonferroni)."""
-    df = get_current_df()
-    if df is None:
-        return jsonify({"error": "No dataset loaded"}), 400
-    data = request.json
-    test_type = data.get("type", "tukey")
-    depvar = data.get("depvar")
-    groupvar = data.get("groupvar")
-
-    if not depvar or not groupvar:
-        return jsonify({"error": "Requires depvar and groupvar"}), 400
-
-    if test_type == "bonferroni":
-        result = se.bonferroni_posthoc(df, depvar, groupvar)
-        log_command(f"oneway {depvar} {groupvar}, bonferroni")
-    else:
-        result = se.tukey_hsd(df, depvar, groupvar)
-        log_command(f"oneway {depvar} {groupvar}, tukey")
-
-    return jsonify({"result": sanitize_for_json(result)})
-
-
-# ---------------------------------------------------------------------------
-# AI ANALYSIS API
-# ---------------------------------------------------------------------------
-
-@app.route("/api/ai/analyze", methods=["POST"])
-def ai_analyze():
-    """Full AI-powered analysis."""
-    df = get_current_df()
-    if df is None:
-        return jsonify({"error": "No dataset loaded. Please upload data first."}), 400
-
-    data = request.json or {}
-    proposal = data.get("proposal", "")
-    question = data.get("question", "")
-    do_research = data.get("research", True)
-
+def stat_posthoc():
+    df = _get_df()
+    if df is None: return _err("No data loaded")
+    d = request.json or {}
     try:
-        result = ai_brain.analyze_data(df, proposal, question, do_research)
-        log_command(f"ai analyze" + (f' "{question[:50]}"' if question else ""))
-        return jsonify({
-            "result": sanitize_for_json(result),
-        })
+        if d.get("method") == "bonferroni":
+            r = se.bonferroni(df, d["depvar"], d["groupvar"])
+        else:
+            r = se.tukey_hsd(df, d["depvar"], d["groupvar"])
+        return _ok(r)
     except Exception as e:
-        return jsonify({"error": str(e), "traceback": traceback.format_exc()}), 500
+        return _err(str(e))
 
 
-@app.route("/api/ai/suggest", methods=["POST"])
-def ai_suggest():
-    """Get AI test suggestions without running analysis."""
-    df = get_current_df()
-    if df is None:
-        return jsonify({"error": "No dataset loaded"}), 400
-
-    data = request.json or {}
-    proposal = data.get("proposal", "")
-
-    data_info = ai_brain.analyze_data_structure(df)
-    suggestions = ai_brain.suggest_tests(data_info, proposal)
-
-    return jsonify({
-        "suggestions": suggestions,
-        "data_info": sanitize_for_json(data_info),
-    })
-
-
-@app.route("/api/ai/research", methods=["POST"])
-def ai_research():
-    """Search academic literature."""
-    data = request.json or {}
-    query = data.get("query", "")
-    if not query:
-        return jsonify({"error": "No search query provided"}), 400
-
-    results = ai_brain.search_literature(query)
-    return jsonify({"results": results, "query": query})
+@app.route("/api/stats/repeated", methods=["POST"])
+def stat_repeated():
+    df = _get_df()
+    if df is None: return _err("No data loaded")
+    d = request.json or {}
+    try:
+        test_type = d.get("test") or d.get("type", "rm_anova")
+        within = d.get("within_vars") or d.get("variables", [])
+        subj = d.get("subject_var") or None
+        if test_type == "friedman":
+            r = se.friedman(df, subj, within)
+        else:
+            r = se.repeated_anova(df, subj, within)
+        return _ok(r)
+    except Exception as e:
+        return _err(str(e))
 
 
-@app.route("/api/ai/proposal", methods=["POST"])
-def upload_proposal():
-    """Upload and parse research proposal for RAG context."""
-    data = request.json or {}
-    proposal_text = data.get("text", "")
-
-    if not proposal_text:
-        return jsonify({"error": "No proposal text provided"}), 400
-
-    result = ai_brain.set_proposal_context(proposal_text)
-    log_command("ai proposal upload")
-    return jsonify({"result": result})
-
-
-@app.route("/api/ai/proposal", methods=["GET"])
-def get_proposal():
-    """Get stored proposal context."""
-    context = ai_brain.get_proposal_context()
-    return jsonify({"context": context})
+@app.route("/api/stats/survival", methods=["POST"])
+def stat_survival():
+    df = _get_df()
+    if df is None: return _err("No data loaded")
+    d = request.json or {}
+    try:
+        stype = d.get("test") or d.get("type", "kaplan_meier")
+        if stype == "cox":
+            r = se.cox_regression(df, d["time_var"], d["event_var"], d["covariates"])
+        else:
+            r = se.kaplan_meier(df, d["time_var"], d["event_var"], d.get("group_var"))
+        return _ok(r)
+    except Exception as e:
+        return _err(str(e))
 
 
-@app.route("/api/ai/map_variables", methods=["POST"])
-def map_variables():
-    """Map proposal variables to data columns."""
-    df = get_current_df()
-    if df is None:
-        return jsonify({"error": "No dataset loaded"}), 400
-
-    data = request.json or {}
-    proposal_text = data.get("proposal", "")
-
-    result = ai_brain.map_variables_to_data(df, proposal_text)
-    return jsonify({"result": result})
-
-
-@app.route("/api/ai/check_references", methods=["POST"])
-def check_references():
-    """Analyze citations in proposal."""
-    data = request.json or {}
-    proposal_text = data.get("text", "")
-
-    result = ai_brain.check_references(proposal_text)
-    return jsonify({"result": result})
+@app.route("/api/stats/power", methods=["POST"])
+def stat_power():
+    d = request.json or {}
+    try:
+        raw = d.get("test") or d.get("test_type", "ttest")
+        test = raw.lower().replace("-", "").replace("_", "").replace("square", "2")
+        # Normalise: "t-test" -> "ttest", "chi-square" -> "chi2"
+        params = {k: v for k, v in d.items()
+                  if k not in ("test", "test_type") and v is not None}
+        if "ttest" in test or test == "t":
+            r = se.power_ttest(**params)
+        elif "anova" in test:
+            r = se.power_anova(**params)
+        elif "chi" in test:
+            r = se.power_chi2(**params)
+        else:
+            return _err(f"Unknown power test: {raw}")
+        return _ok(r)
+    except Exception as e:
+        return _err(str(e))
 
 
-@app.route("/api/ai/sample_size_from_text", methods=["POST"])
-def sample_size_from_text():
-    """Calculate sample size from text with Mean/SD values."""
-    data = request.json or {}
-    text = data.get("text", "")
-    alpha = data.get("alpha", 0.05)
-    power = data.get("power", 0.80)
+@app.route("/api/stats/sample_size", methods=["POST"])
+def stat_sample_size():
+    d = request.json or {}
+    try:
+        raw = d.get("type") or d.get("test_type", "means")
+        if raw == "proportions" or raw == "proportion":
+            r = se.sample_size_proportions(float(d["p1"]), float(d["p2"]),
+                                            float(d.get("alpha", 0.05)),
+                                            float(d.get("power", 0.80)))
+        else:
+            delta = float(d.get("delta") or d.get("effect_size", 0.5))
+            sd = float(d.get("sd", 1.0))
+            r = se.sample_size_means(delta, sd,
+                                      float(d.get("alpha", 0.05)),
+                                      float(d.get("power", 0.80)))
+        return _ok(r)
+    except Exception as e:
+        return _err(str(e))
 
-    if not text:
-        return jsonify({"error": "No text provided"}), 400
 
-    result = ai_brain.calculate_sample_size_from_text(text, alpha, power)
-    log_command("sample size from text")
-    return jsonify({"result": sanitize_for_json(result)})
+@app.route("/api/stats/smart", methods=["POST"])
+def stat_smart():
+    df = _get_df()
+    if df is None: return _err("No data loaded")
+    d = request.json or {}
+    try:
+        r = se.smart_analysis(df, d.get("columns", list(df.columns)),
+                              subject_var=d.get("subject_var"))
+        # Normalize keys for frontend
+        if "test_name" in r and "selected_test" not in r:
+            r["selected_test"] = r.pop("test_name")
+        if "test_result" in r and "result" not in r:
+            r["result"] = r.pop("test_result")
+        if isinstance(r.get("reasoning"), list):
+            r["reasoning"] = "; ".join(r["reasoning"])
+        return _ok(r)
+    except Exception as e:
+        return _err(str(e))
 
 
 # ---------------------------------------------------------------------------
-# AGENT CORE API
+# ROUTES — AI Agent endpoints
 # ---------------------------------------------------------------------------
 
 @app.route("/api/agent/models")
-def get_agent_models():
-    """Get list of available Ollama models."""
+def agent_models():
     try:
-        models = agent_core.get_available_models()
-        current = agent_core.get_model()
-        is_running = agent_core.is_ollama_available()
-        return jsonify({
-            "models": models,
-            "current": current,
-            "ollama_running": is_running,
-            "fallback_mode": not is_running
-        })
+        ac = _agent()
+        return jsonify({"models": ac.get_available_models(),
+                        "current": ac.get_model(),
+                        "ollama_running": ac.is_ollama_available(),
+                        "fallback_mode": not ac.is_ollama_available()})
     except Exception as e:
-        return jsonify({"error": str(e), "models": ["llama3.2"], "current": "llama3.2", "ollama_running": False, "fallback_mode": True})
-
-
-@app.route("/api/agent/ollama_status")
-def ollama_status():
-    """Check Ollama availability and report fallback status."""
-    agent_core.reset_ollama_check()  # Force fresh check
-    available = agent_core.is_ollama_available()
-    return jsonify({
-        "available": available,
-        "fallback_mode": not available,
-        "message": "Ollama is running" if available else "Ollama not available - using Python fallbacks for data parsing and report generation. Statistics (Stage 2) are unaffected."
-    })
+        return jsonify({"error": str(e), "models": ["llama3.2"],
+                        "current": "llama3.2", "ollama_running": False,
+                        "fallback_mode": True})
 
 
 @app.route("/api/agent/models", methods=["POST"])
-def set_agent_model():
-    """Set the active Ollama model."""
-    data = request.json or {}
-    model_name = data.get("model", "llama3.2")
-    agent_core.set_model(model_name)
-    return jsonify({"success": True, "model": model_name})
+def agent_set_model():
+    d = request.json or {}
+    _agent().set_model(d.get("model", "llama3.2"))
+    return jsonify({"success": True, "model": d.get("model", "llama3.2")})
 
 
-@app.route("/api/agent/messy_data", methods=["POST"])
-def analyze_messy_data():
-    """
-    Messy Data Analysis Agent:
-    1. AI cleans/structures the raw data
-    2. Python runs ANOVA + post-hoc tests
-    3. AI interprets the results
-    """
-    data = request.json or {}
-    raw_text = data.get("raw_text", "")
-    context = data.get("context", "")
-
-    if not raw_text:
-        return jsonify({"error": "No data text provided"}), 400
-
-    try:
-        result = agent_core.run_messy_data_analysis(raw_text, context)
-        log_command("agent messy_data")
-        return jsonify({"result": sanitize_for_json(result)})
-    except Exception as e:
-        return jsonify({"error": str(e), "traceback": traceback.format_exc()}), 500
-
-
-@app.route("/api/agent/sample_size_auto", methods=["POST"])
-def sample_size_auto():
-    """
-    AI-powered sample size calculation via web search.
-    Searches for similar studies and extracts Mean/SD to compute effect size.
-    """
-    data = request.json or {}
-    topic = data.get("topic", "")
-
-    if not topic:
-        return jsonify({"error": "No research topic provided"}), 400
-
-    try:
-        result = agent_core.search_for_sample_size_data(topic)
-        log_command(f'agent sample_size_auto "{topic[:50]}"')
-        return jsonify({"result": sanitize_for_json(result)})
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-
-@app.route("/api/agent/sample_size_manual", methods=["POST"])
-def sample_size_manual():
-    """Manual sample size calculation with user-provided effect size."""
-    data = request.json or {}
-    effect_size = data.get("effect_size", 0.5)
-    alpha = data.get("alpha", 0.05)
-    power = data.get("power", 0.80)
-    test_type = data.get("test_type", "t-test")
-
-    result = agent_core.calculate_sample_size_manual(effect_size, alpha, power, test_type)
-    log_command("agent sample_size_manual")
-    return jsonify({"result": sanitize_for_json(result)})
-
-
-@app.route("/api/agent/literature_review", methods=["POST"])
-def literature_review():
-    """
-    Literature Review Agent:
-    1. Searches academic sources
-    2. AI synthesizes into coherent review
-    3. Returns with numbered citations
-    """
-    data = request.json or {}
-    topic = data.get("topic", "")
-    context = data.get("context", "")
-
-    if not topic:
-        return jsonify({"error": "No research topic provided"}), 400
-
-    try:
-        result = agent_core.generate_literature_review(topic, context)
-        log_command(f'agent literature_review "{topic[:50]}"')
-        return jsonify({"result": sanitize_for_json(result)})
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-
-@app.route("/api/agent/web_search", methods=["POST"])
-def agent_web_search():
-    """Direct web search via DuckDuckGo."""
-    data = request.json or {}
-    query = data.get("query", "")
-    max_results = data.get("max_results", 5)
-
-    if not query:
-        return jsonify({"error": "No search query provided"}), 400
-
-    results = agent_core.search_web(query, max_results)
-    return jsonify({"results": results})
-
-
-@app.route("/api/agent/parse_pdf", methods=["POST"])
-def parse_pdf_endpoint():
-    """Parse text from uploaded PDF file."""
-    if "file" not in request.files:
-        return jsonify({"error": "No file uploaded"}), 400
-
-    file = request.files["file"]
-    if file.filename == "":
-        return jsonify({"error": "No file selected"}), 400
-
-    if not file.filename.lower().endswith(".pdf"):
-        return jsonify({"error": "File must be a PDF"}), 400
-
-    try:
-        pdf_bytes = file.read()
-        text = agent_core.parse_pdf_bytes(pdf_bytes)
-        return jsonify({"success": True, "text": text, "filename": file.filename})
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+@app.route("/api/agent/ollama_status")
+def agent_ollama_status():
+    ac = _agent()
+    ac.reset_ollama_check()
+    avail = ac.is_ollama_available()
+    return jsonify({"available": avail, "fallback_mode": not avail,
+                    "message": "Ollama is running" if avail else
+                    "Ollama not available — Python fallbacks active. Statistics unaffected."})
 
 
 @app.route("/api/agent/universal_analyze", methods=["POST"])
-def universal_analyze():
-    """
-    3-Layer Universal Statistical Analysis Agent:
-
-    Layer 1: Universal Adapter (AI)
-        - Takes ANY Excel layout and extracts standardized JSON
-        - Format: {"Group_A": [val1, val2...], "Group_B": [val1, val2...]}
-
-    Layer 2: Rigorous Math Engine (Python)
-        - Validates n > 2 per group
-        - Runs One-Way ANOVA (scipy.stats.f_oneway)
-        - Runs Tukey HSD post-hoc (statsmodels)
-        - Calculates Mean, SD, 95% CI
-
-    Layer 3: Context-Aware Reporter (AI)
-        - Detects test type from headers/proposal
-        - Applies correct interpretation (higher vs lower = better)
-        - Generates academic results paragraph
-    """
-    data = request.json or {}
-    raw_text = data.get("raw_text", "")
-    proposal_context = data.get("proposal_context", "")
-    test_type_hint = data.get("test_type", None)  # "higher", "lower", or auto-detect
-
-    if not raw_text:
-        return jsonify({"error": "No data provided. Paste your Excel/CSV data."}), 400
-
+def agent_universal():
+    d = request.json or {}
+    raw = d.get("raw_text", "")
+    ctx = d.get("proposal_context", "")
+    hint = d.get("test_type") or None
+    if not raw.strip():
+        return _err("No data provided")
     try:
-        result = agent_core.run_universal_analysis(raw_text, proposal_context, test_type_hint)
-        log_command("agent universal_analyze")
-        return jsonify({"result": sanitize_for_json(result)})
+        r = _agent().run_universal_analysis(raw, ctx, hint)
+        return jsonify({"result": _safe(r)})
     except Exception as e:
-        return jsonify({"error": str(e), "traceback": traceback.format_exc()}), 500
+        traceback.print_exc()
+        return _err(f"Pipeline error: {e}", 500)
 
 
-@app.route("/api/agent/universal_analyze_file", methods=["POST"])
-def universal_analyze_file():
-    """
-    Universal Analysis with file upload (Excel/CSV).
-    Extracts raw text from file, then runs 3-layer analysis.
-    """
-    if "file" not in request.files:
-        return jsonify({"error": "No file uploaded"}), 400
-
-    file = request.files["file"]
-    if file.filename == "":
-        return jsonify({"error": "No file selected"}), 400
-
-    filename = secure_filename(file.filename)
-    ext = filename.rsplit(".", 1)[1].lower() if "." in filename else ""
-
-    if ext not in ALLOWED_EXTENSIONS:
-        return jsonify({"error": f"Unsupported file type. Allowed: {', '.join(ALLOWED_EXTENSIONS)}"}), 400
-
-    filepath = os.path.join(app.config["UPLOAD_FOLDER"], filename)
-    file.save(filepath)
-
+@app.route("/api/agent/analyze", methods=["POST"])
+def agent_analyze():
+    df = _get_df()
+    if df is None: return _err("No data loaded")
+    d = request.json or {}
     try:
-        # Read file as text for AI processing
-        if ext == "csv":
-            df = pd.read_csv(filepath, header=None)
-        elif ext in ("xlsx", "xls"):
-            df = pd.read_excel(filepath, header=None)
-        elif ext == "tsv" or ext == "txt":
-            df = pd.read_csv(filepath, sep="\t", header=None)
-        else:
-            df = pd.read_csv(filepath, header=None)
-
-        # Convert DataFrame to text representation for AI
-        raw_text = df.to_string(index=False, header=False)
-
-        # Get optional form data
-        proposal_context = request.form.get("proposal_context", "")
-        test_type_hint = request.form.get("test_type", None)
-
-        # Run universal analysis
-        result = agent_core.run_universal_analysis(raw_text, proposal_context, test_type_hint)
-        log_command(f"agent universal_analyze_file {filename}")
-
-        return jsonify({"result": sanitize_for_json(result), "filename": filename})
-
+        r = _brain().analyze_data(df, d.get("proposal", ""),
+                                   d.get("question", ""),
+                                   d.get("do_research", True))
+        return jsonify({"result": _safe(r)})
     except Exception as e:
-        return jsonify({"error": str(e), "traceback": traceback.format_exc()}), 500
-    finally:
-        if os.path.exists(filepath):
-            os.remove(filepath)
+        traceback.print_exc()
+        return _err(f"AI analysis error: {e}", 500)
+
+
+@app.route("/api/agent/smart_analyze", methods=["POST"])
+def agent_smart():
+    df = _get_df()
+    if df is None: return _err("No data loaded")
+    d = request.json or {}
+    try:
+        cols = d.get("columns") or list(df.columns)
+        r = se.smart_analysis(df, cols, subject_var=d.get("subject_var"))
+        return jsonify({"result": _safe(r)})
+    except Exception as e:
+        return _err(str(e))
+
+
+@app.route("/api/agent/messy_data", methods=["POST"])
+def agent_messy():
+    df = _get_df()
+    if df is None: return _err("No data loaded")
+    d = request.json or {}
+    try:
+        r = _agent().agent_messy_data(df, d.get("description", ""))
+        return jsonify({"result": _safe(r)})
+    except Exception as e:
+        return _err(str(e))
+
+
+@app.route("/api/agent/sample_size_text", methods=["POST"])
+def agent_sample_size_text():
+    d = request.json or {}
+    text = d.get("text", "")
+    if not text.strip(): return _err("No text provided")
+    try:
+        r = _brain().calculate_sample_size_from_text(text,
+                alpha=float(d.get("alpha", 0.05)),
+                power=float(d.get("power", 0.80)))
+        return jsonify({"result": _safe(r)})
+    except Exception as e:
+        return _err(str(e))
+
+
+@app.route("/api/agent/literature", methods=["POST"])
+def agent_literature():
+    d = request.json or {}
+    query = d.get("query", "")
+    if not query.strip(): return _err("No query provided")
+    try:
+        r = _brain().search_literature(query, max_results=int(d.get("max", 5)))
+        return jsonify({"result": _safe(r)})
+    except Exception as e:
+        return _err(str(e))
+
+
+@app.route("/api/agent/proposal", methods=["POST"])
+def agent_proposal():
+    d = request.json or {}
+    text = d.get("text", "")
+    if not text.strip(): return _err("No proposal text")
+    try:
+        r = _brain().set_proposal_context(text)
+        return jsonify({"result": _safe(r)})
+    except Exception as e:
+        return _err(str(e))
 
 
 # ---------------------------------------------------------------------------
-# COMMAND LINE INTERFACE (Stata-style command execution)
+# ROUTES — Command-line interface
 # ---------------------------------------------------------------------------
 
 @app.route("/api/command", methods=["POST"])
-def execute_command():
-    """Execute a Stata-style command string."""
-    df = get_current_df()
-    data = request.json or {}
-    cmd = data.get("command", "").strip()
-
+def run_command():
+    d = request.json or {}
+    cmd = d.get("command", "").strip()
     if not cmd:
-        return jsonify({"error": "No command provided"}), 400
-
-    log_command(cmd)
-
+        return _err("No command")
     try:
-        result = parse_and_execute(cmd, df)
-        return jsonify({"result": sanitize_for_json(result)})
+        return jsonify({"result": _safe(_exec_command(cmd))})
     except Exception as e:
-        return jsonify({"error": str(e)}), 400
+        return jsonify({"result": {"output": f"Error: {e}", "error": True}})
 
 
-def parse_and_execute(cmd, df):
-    """Parse a Stata-style command and execute it."""
-    parts = cmd.strip().split()
-    if not parts:
-        return {"error": "Empty command"}
+def _exec_command(cmd):
+    """Parse and execute a Stata-style command string."""
+    df = _get_df()
+    parts = cmd.split()
+    verb = parts[0].lower() if parts else ""
 
-    command = parts[0].lower()
+    if verb == "help":
+        return {"output": _help_text()}
 
-    # --- DESCRIBE ---
-    if command in ("describe", "desc", "d"):
-        if df is None:
-            return {"output": "No dataset in memory"}
-        info = se.detect_variable_types(df)
-        output = f"Contains {len(df)} observations and {len(df.columns)} variables\n\n"
-        output += info.to_string(index=False)
-        return {"output": output}
+    if verb in ("tests", "list"):
+        catalog = se.list_tests()
+        lines = ["Available tests:", "-" * 50]
+        for k, v in catalog.items():
+            lines.append(f"  {k:<25} {v['desc']:<35} [{v['stata']}]")
+        return {"output": "\n".join(lines)}
 
-    # --- SUMMARIZE ---
-    if command in ("summarize", "sum", "su"):
-        if df is None:
-            return {"output": "No dataset in memory"}
+    if verb in ("describe", "desc", "summarize", "sum"):
+        if df is None: return {"output": "No data loaded. Use Open to load a file."}
         variables = parts[1:] if len(parts) > 1 else None
-        # Check for detail option
-        detail = False
-        if variables and "detail" in [v.lower().strip(",") for v in variables]:
-            detail = True
-            variables = [v for v in variables if v.lower().strip(",") != "detail"]
-            if not variables:
-                variables = None
-        result = se.descriptive_stats(df, variables, detail)
-        return {"output": result.to_string(index=False)}
+        detail = "detail" in cmd.lower() or ",d" in cmd.lower()
+        r = se.descriptive(df, variables, detail=detail)
+        return {"output": r.to_string(index=False)}
 
-    # --- TABULATE ---
-    if command in ("tabulate", "tab"):
-        if df is None:
-            return {"output": "No dataset in memory"}
-        if len(parts) < 2:
-            return {"error": "Syntax: tabulate var1 [var2] [, chi2]"}
-        chi2 = "chi2" in cmd.lower()
-        var1 = parts[1]
-        var2 = parts[2] if len(parts) > 2 and not parts[2].startswith(",") else None
-        result = se.tabulate(df, var1, var2)
-        output = result.to_string()
-        if chi2 and var2:
-            chi_res = se.chi_square_test(df, var1, var2)
-            output += f"\n\nPearson chi2({chi_res['df']}) = {chi_res['chi2']:.4f}   Pr = {chi_res['Pr']:.4f}"
-            output += f"\nCramer's V = {chi_res['cramers_v']:.4f}"
-        return {"output": output}
+    if verb in ("tabulate", "tab"):
+        if df is None: return {"output": "No data loaded."}
+        if len(parts) < 2: return {"output": "Usage: tab var1 [var2]"}
+        v1 = parts[1]; v2 = parts[2] if len(parts) > 2 else None
+        r = se.tabulate(df, v1, v2)
+        return {"output": r.to_string()}
 
-    # --- TTEST ---
-    if command == "ttest":
-        if df is None:
-            return {"output": "No dataset in memory"}
-        # Parse: ttest var, by(group) or ttest var == value or ttest var1 == var2
-        cmd_body = " ".join(parts[1:])
-        if "by(" in cmd_body:
-            var = cmd_body.split(",")[0].strip()
-            group = cmd_body.split("by(")[1].split(")")[0].strip()
-            result = se.ttest_two_sample(df, var, group)
-        elif "==" in cmd_body:
-            left, right = cmd_body.split("==")
-            left = left.strip()
-            right = right.strip()
+    if verb == "ttest":
+        if df is None: return {"output": "No data loaded."}
+        if "==" in cmd:
+            idx = parts.index("==")
+            v = parts[1]
+            rhs = parts[idx + 1] if idx + 1 < len(parts) else "0"
             try:
-                mu = float(right)
-                result = se.ttest_one_sample(df, left, mu)
+                mu = float(rhs)
+                r = se.ttest_one(df, v, mu=mu)
             except ValueError:
-                result = se.ttest_paired(df, left, right)
-        else:
-            return {"error": "Syntax: ttest var, by(group) | ttest var == # | ttest var1 == var2"}
-        return {"output": json.dumps(result, indent=2, default=str)}
+                r = se.ttest_paired(df, v, rhs)
+            return {"output": json.dumps(_safe(r), indent=2)}
+        if "by(" in cmd.lower():
+            import re as _re
+            m = _re.search(r"by\((\w+)\)", cmd, _re.IGNORECASE)
+            gv = m.group(1) if m else parts[-1]
+            v = parts[1].rstrip(",")
+            r = se.ttest_two(df, v, gv)
+            return {"output": json.dumps(_safe(r), indent=2)}
+        return {"output": "Usage: ttest var == mu | ttest var, by(group) | ttest v1 == v2"}
 
-    # --- ONEWAY ---
-    if command == "oneway":
-        if df is None or len(parts) < 3:
-            return {"error": "Syntax: oneway depvar groupvar"}
-        result = se.oneway_anova(df, parts[1], parts[2])
-        output = f"One-way ANOVA: {parts[1]} by {parts[2]}\n"
-        output += f"\nF({result['anova_table']['df'][0]}, {result['anova_table']['df'][1]}) = {result['F']}"
-        output += f"\nProb > F = {result['Prob > F']}\n"
-        for gs in result["group_stats"]:
-            output += f"\n  {gs['Group']}: Mean={gs['Mean']}, SD={gs['Std. Dev.']}, N={gs['N']}"
-        output += f"\n\nBartlett's chi2 = {result['bartlett']['chi2']}, p = {result['bartlett']['p']}"
-        return {"output": output}
+    if verb == "oneway":
+        if df is None: return {"output": "No data loaded."}
+        if len(parts) < 3: return {"output": "Usage: oneway depvar groupvar"}
+        r = se.oneway_anova(df, parts[1], parts[2])
+        return {"output": _fmt_anova(r)}
 
-    # --- ANOVA ---
-    if command == "anova":
-        if df is None or len(parts) < 4:
-            return {"error": "Syntax: anova depvar factor1 factor2"}
-        result = se.twoway_anova(df, parts[1], parts[2], parts[3])
-        return {"output": result.get("anova_table_str", str(result))}
+    if verb in ("regress", "reg"):
+        if df is None: return {"output": "No data loaded."}
+        if len(parts) < 3: return {"output": "Usage: regress depvar indep1 [indep2 ...]"}
+        r = se.ols_regression(df, parts[1], parts[2:])
+        return {"output": r.get("summary", json.dumps(_safe(r), indent=2))}
 
-    # --- REGRESS ---
-    if command in ("regress", "reg"):
-        if df is None or len(parts) < 3:
-            return {"error": "Syntax: regress depvar indep1 [indep2 ...]"}
-        robust = "robust" in cmd.lower() or "vce(robust)" in cmd.lower()
-        indeps = [p for p in parts[2:] if p.lower() not in (",", "robust", "vce(robust)")]
-        result = se.linear_regression(df, parts[1], indeps, robust)
-        return {"output": result.get("summary", str(result))}
+    if verb in ("logit", "logistic"):
+        if df is None: return {"output": "No data loaded."}
+        if len(parts) < 3: return {"output": "Usage: logit depvar indep1 [indep2 ...]"}
+        r = se.logistic_regression(df, parts[1], parts[2:])
+        return {"output": r.get("summary", json.dumps(_safe(r), indent=2))}
 
-    # --- LOGIT ---
-    if command in ("logit", "logistic"):
-        if df is None or len(parts) < 3:
-            return {"error": "Syntax: logit depvar indep1 [indep2 ...]"}
-        result = se.logistic_regression(df, parts[1], parts[2:])
-        return {"output": result.get("summary", str(result))}
-
-    # --- PROBIT ---
-    if command == "probit":
-        if df is None or len(parts) < 3:
-            return {"error": "Syntax: probit depvar indep1 [indep2 ...]"}
-        result = se.probit_regression(df, parts[1], parts[2:])
-        return {"output": result.get("summary", str(result))}
-
-    # --- CORRELATE ---
-    if command in ("correlate", "corr", "pwcorr"):
-        if df is None:
-            return {"output": "No dataset in memory"}
+    if verb in ("pwcorr", "corr", "correlate"):
+        if df is None: return {"output": "No data loaded."}
         variables = parts[1:] if len(parts) > 1 else df.select_dtypes(include=[np.number]).columns.tolist()
-        result = se.correlation_matrix(df, variables)
-        return {"output": result["correlation_str"]}
+        r = se.correlation(df, variables[:10])
+        return {"output": r.get("correlation_str", "")}
 
-    # --- SPEARMAN ---
-    if command == "spearman":
-        if df is None:
-            return {"output": "No dataset in memory"}
-        variables = parts[1:] if len(parts) > 1 else df.select_dtypes(include=[np.number]).columns.tolist()
-        result = se.correlation_matrix(df, variables, method="spearman")
-        return {"output": result["correlation_str"]}
+    if verb in ("sktest", "swilk", "normality"):
+        if df is None: return {"output": "No data loaded."}
+        if len(parts) < 2: return {"output": "Usage: sktest variable"}
+        r = se.normality(df, parts[1])
+        return {"output": json.dumps(_safe(r), indent=2)}
 
-    # --- RANKSUM ---
-    if command == "ranksum":
-        if df is None:
-            return {"error": "No dataset in memory"}
-        cmd_body = " ".join(parts[1:])
-        var = cmd_body.split(",")[0].strip()
-        group = cmd_body.split("by(")[1].split(")")[0].strip() if "by(" in cmd_body else parts[2]
-        result = se.mann_whitney_u(df, var, group)
-        return {"output": json.dumps(result, indent=2, default=str)}
+    if verb == "ranksum":
+        if df is None: return {"output": "No data loaded."}
+        import re as _re
+        m = _re.search(r"by\((\w+)\)", cmd, _re.IGNORECASE)
+        if m and len(parts) >= 2:
+            r = se.mann_whitney(df, parts[1].rstrip(","), m.group(1))
+            return {"output": json.dumps(_safe(r), indent=2)}
+        return {"output": "Usage: ranksum var, by(group)"}
 
-    # --- KWALLIS ---
-    if command == "kwallis":
-        if df is None:
-            return {"error": "No dataset in memory"}
-        cmd_body = " ".join(parts[1:])
-        var = cmd_body.split(",")[0].strip()
-        group = cmd_body.split("by(")[1].split(")")[0].strip() if "by(" in cmd_body else parts[2]
-        result = se.kruskal_wallis(df, var, group)
-        return {"output": json.dumps(result, indent=2, default=str)}
+    if verb == "kwallis":
+        if df is None: return {"output": "No data loaded."}
+        import re as _re
+        m = _re.search(r"by\((\w+)\)", cmd, _re.IGNORECASE)
+        if m and len(parts) >= 2:
+            r = se.kruskal_wallis(df, parts[1].rstrip(","), m.group(1))
+            return {"output": json.dumps(_safe(r), indent=2)}
+        return {"output": "Usage: kwallis var, by(group)"}
 
-    # --- SIGNRANK ---
-    if command == "signrank":
-        if df is None:
-            return {"error": "No dataset in memory"}
-        cmd_body = " ".join(parts[1:])
-        var1, var2 = [v.strip() for v in cmd_body.split("=")]
-        result = se.wilcoxon_signed_rank(df, var1, var2)
-        return {"output": json.dumps(result, indent=2, default=str)}
+    if verb == "use":
+        return {"output": "Use the Open button to load data files."}
 
-    # --- SKTEST ---
-    if command == "sktest":
-        if df is None or len(parts) < 2:
-            return {"error": "Syntax: sktest variable"}
-        result = se.normality_test(df, parts[1])
-        return {"output": json.dumps(result, indent=2, default=str)}
+    if verb == "clear":
+        _store["df"] = None; _store["filename"] = None
+        _store["columns"] = []; _store["dtypes"] = {}
+        return {"output": "Data cleared."}
 
-    # --- POWER ---
-    if command == "power":
-        return {"output": "Use the Power Analysis panel in the GUI or /api/stats/power endpoint"}
+    return {"output": f"Unrecognised command: {verb}. Type 'help' for a list of commands."}
 
-    # --- LIST ---
-    if command in ("list", "li", "l"):
-        if df is None:
-            return {"output": "No dataset in memory"}
-        n = min(20, len(df))
-        return {"output": df.head(n).to_string()}
 
-    # --- COUNT ---
-    if command == "count":
-        if df is None:
-            return {"output": "No dataset in memory"}
-        return {"output": f"  {len(df)}"}
-
-    # --- CLEAR ---
-    if command == "clear":
-        datasets.clear()
-        return {"output": "Dataset cleared from memory"}
-
-    # --- HELP ---
-    if command == "help":
-        tests = se.list_available_tests()
-        output = "SolarSTATA Available Commands:\n"
-        output += "=" * 50 + "\n"
-        for key, val in tests.items():
-            output += f"  {val['stata_cmd']:30s} | {val['description']}\n"
-        output += "\nData Commands: describe, list, count, clear\n"
-        output += "AI Commands: ai analyze, ai suggest, ai research\n"
-        return {"output": output}
-
-    # --- AI COMMANDS ---
-    if command == "ai":
-        if len(parts) < 2:
-            return {"error": "Syntax: ai analyze/suggest/research [query]"}
-        sub = parts[1].lower()
-        query = " ".join(parts[2:]) if len(parts) > 2 else ""
-
-        if sub == "analyze":
-            if df is None:
-                return {"error": "No dataset loaded"}
-            result = ai_brain.analyze_data(df, proposal_text=query, user_question=query)
-            return {"output": result.get("stdout", ""), "code": result.get("generated_code", "")}
-        elif sub == "suggest":
-            if df is None:
-                return {"error": "No dataset loaded"}
-            data_info = ai_brain.analyze_data_structure(df)
-            suggestions = ai_brain.suggest_tests(data_info, query)
-            output = "Suggested Statistical Tests:\n"
-            for s in suggestions:
-                output += f"  [{s['priority']}] {s['test']}: {s['reason']}\n"
-            return {"output": output}
-        elif sub == "research":
-            results = ai_brain.search_literature(query)
-            output = f"Literature Search: '{query}'\n"
-            for r in results:
-                if "error" not in r:
-                    output += f"\n  [{r.get('source')}] {r.get('title', 'N/A')}"
-                    output += f"\n    {r.get('authors', 'N/A')} ({r.get('year', 'N/A')})"
-                    output += f"\n    {r.get('journal', 'N/A')}\n"
-            return {"output": output}
-
-    return {"error": f"Unrecognized command: {command}. Type 'help' for available commands."}
+def _help_text():
+    return """SolarSTATA Command Reference
+============================
+  describe [vars]        Descriptive statistics
+  summarize [vars]       Same as describe
+  tab var1 [var2]        Frequency / cross-tabulation
+  ttest var == mu        One-sample t-test
+  ttest var, by(group)   Two-sample t-test
+  ttest v1 == v2         Paired t-test
+  oneway depvar group    One-way ANOVA
+  regress y x1 x2 ...   Linear regression
+  logit y x1 x2 ...     Logistic regression
+  pwcorr [vars]          Correlation matrix
+  sktest var             Normality test
+  ranksum var, by(grp)   Mann-Whitney U
+  kwallis var, by(grp)   Kruskal-Wallis H
+  tests                  List all available tests
+  clear                  Clear loaded data
+  help                   Show this help"""
 
 
 # ---------------------------------------------------------------------------
-# UTILITY ROUTES
+# ROUTES — health
 # ---------------------------------------------------------------------------
-
-@app.route("/api/history")
-def get_history():
-    return jsonify({"history": command_history[-100:]})
-
-
-@app.route("/api/tests")
-def list_tests():
-    return jsonify(se.list_available_tests())
-
 
 @app.route("/api/health")
 def health():
-    return jsonify({"status": "ok", "version": "1.0.0", "name": "SolarSTATA"})
+    return jsonify({"status": "ok", "version": "2.0.0", "name": "SolarSTATA"})
 
+
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
     app.run(debug=True, host="0.0.0.0", port=5001)

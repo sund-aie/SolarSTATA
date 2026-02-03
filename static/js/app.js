@@ -1,2176 +1,1356 @@
 /**
- * SolarSTATA - Main Application JavaScript
- * Stata 19-like interface with AI integration
+ * SolarSTATA v2.0 - Main Application JavaScript
+ * Stata 19-inspired statistical analysis interface with AI integration.
+ *
+ * Matches HTML (templates/index.html) and CSS (static/css/stata.css).
  */
 
-// ============================================================
-// STATE
-// ============================================================
-const State = {
-    dataLoaded: false,
-    columns: [],
-    dtypes: {},
-    dataInfo: null,
+/* ==================================================================
+   1. STATE
+   ================================================================== */
+const S = {
+    loaded:       false,
+    columns:      [],
+    dtypes:       {},
+    dataInfo:     null,
     selectedVars: [],
-    commandHistory: [],
-    historyIndex: -1,
-    currentTab: "welcome",
-    aiMessages: [],
+    cmdHistory:   [],
+    histIdx:      -1,
+    curTab:       "output",
+    curTest:      null,         // which stat test modal is being configured
 };
 
-// ============================================================
-// INITIALIZATION
-// ============================================================
+/* ==================================================================
+   2. BOOTSTRAP
+   ================================================================== */
 document.addEventListener("DOMContentLoaded", () => {
     initTabs();
+    initRightTabs();
     initCommandInput();
-    initAIChat();
-    initFileUpload();
-    initRightPanel();
-    initKeyboardShortcuts();
-    loadAvailableModels();
-    showToast("SolarSTATA ready. Load data to begin.", "success");
+    initToolbar();
+    initTestButtons();
+    initAgentButtons();
+    initModals();
+    initVariableSearch();
+    initKeyboard();
+    loadModels();
+    toast("SolarSTATA ready. Load data to begin.", "success");
 });
 
-// ============================================================
-// TAB MANAGEMENT
-// ============================================================
+/* ==================================================================
+   3. TAB SYSTEM (center area)
+   ================================================================== */
 function initTabs() {
-    document.querySelectorAll(".tab").forEach(tab => {
-        tab.addEventListener("click", () => {
-            switchTab(tab.dataset.tab);
+    document.querySelectorAll("#tab-bar .tab").forEach(t => {
+        t.addEventListener("click", () => switchTab(t.dataset.tab));
+    });
+}
+
+function switchTab(id) {
+    document.querySelectorAll("#tab-bar .tab").forEach(t => t.classList.toggle("active", t.dataset.tab === id));
+    document.querySelectorAll("#center-area > .tab-content").forEach(c => c.classList.toggle("active", c.id === `tab-${id}`));
+    S.curTab = id;
+}
+
+/* ==================================================================
+   4. RIGHT PANEL TABS (Tests / AI Agent)
+   ================================================================== */
+function initRightTabs() {
+    document.querySelectorAll("#right-tabs .right-tab").forEach(t => {
+        t.addEventListener("click", () => {
+            document.querySelectorAll("#right-tabs .right-tab").forEach(x => x.classList.remove("active"));
+            document.querySelectorAll("#right-panel .right-content").forEach(x => x.classList.remove("active"));
+            t.classList.add("active");
+            const panel = document.getElementById(t.dataset.panel);
+            if (panel) panel.classList.add("active");
         });
     });
 }
 
-function switchTab(tabId) {
-    document.querySelectorAll(".tab").forEach(t => t.classList.remove("active"));
-    document.querySelectorAll(".tab-content").forEach(c => c.classList.remove("active"));
-
-    const tab = document.querySelector(`.tab[data-tab="${tabId}"]`);
-    const content = document.getElementById(`tab-${tabId}`);
-    if (tab) tab.classList.add("active");
-    if (content) content.classList.add("active");
-    State.currentTab = tabId;
-}
-
-// ============================================================
-// FILE UPLOAD
-// ============================================================
-function initFileUpload() {
-    // Hidden file input
+/* ==================================================================
+   5. TOOLBAR
+   ================================================================== */
+function initToolbar() {
+    const btnOpen = document.getElementById("btn-open");
     const fileInput = document.getElementById("file-input");
-    if (fileInput) {
-        fileInput.addEventListener("change", handleFileUpload);
-    }
-}
+    const btnSave = document.getElementById("btn-save-log");
+    const btnHelp = document.getElementById("btn-help");
+    const banner = document.getElementById("dismiss-banner");
 
-function openFile() {
-    document.getElementById("file-input").click();
+    if (btnOpen) btnOpen.addEventListener("click", () => fileInput.click());
+    if (fileInput) fileInput.addEventListener("change", handleFileUpload);
+    if (btnSave) btnSave.addEventListener("click", saveLog);
+    if (btnHelp) btnHelp.addEventListener("click", showHelp);
+    if (banner) banner.addEventListener("click", () => {
+        document.getElementById("fallback-banner").style.display = "none";
+    });
 }
 
 async function handleFileUpload(e) {
     const file = e.target.files[0];
     if (!file) return;
-
-    const formData = new FormData();
-    formData.append("file", file);
-
+    const fd = new FormData();
+    fd.append("file", file);
     setStatus("loading", `Loading ${file.name}...`);
-    showToast(`Uploading ${file.name}...`);
-
+    toast(`Uploading ${file.name}...`);
     try {
-        const resp = await fetch("/api/upload", { method: "POST", body: formData });
-        const data = await resp.json();
-
-        if (data.error) {
-            showToast(data.error, "error");
-            setStatus("error", data.error);
-            return;
-        }
-
-        State.dataLoaded = true;
-        State.columns = data.columns;
-        State.dtypes = data.dtypes;
-        State.dataInfo = data.data_info;
-
-        updateVariablesList(data.data_info);
-        renderDataTable(data.preview, data.columns);
-        updateProperties(data);
+        const r = await fetch("/api/upload", { method: "POST", body: fd });
+        const d = await r.json();
+        if (d.error) { toast(d.error, "error"); setStatus("error", d.error); return; }
+        S.loaded = true;
+        S.columns = d.columns || [];
+        S.dtypes = d.dtypes || {};
+        S.dataInfo = d.data_info || null;
+        updateVarList();
+        renderDataTable(d.preview, d.columns);
         switchTab("data");
-        setStatus("ok", `${data.filename}: ${data.shape[0]} obs, ${data.shape[1]} vars`);
-        appendOutput("use", `"${data.filename}"`, data.message);
-        showToast(data.message, "success");
+        setStatus("ok", `${d.filename}: ${d.shape[0]} obs, ${d.shape[1]} vars`);
+        document.getElementById("status-data").textContent = `${d.shape[0]} obs, ${d.shape[1]} vars`;
+        appendOutput("use", `use "${d.filename}"`, d.message || "Data loaded.");
+        toast(d.message || "Data loaded.", "success");
     } catch (err) {
-        showToast(`Upload failed: ${err.message}`, "error");
+        toast(`Upload failed: ${err.message}`, "error");
         setStatus("error", "Upload failed");
     }
-
     e.target.value = "";
 }
 
-// ============================================================
-// VARIABLES PANEL
-// ============================================================
-function updateVariablesList(dataInfo) {
+function saveLog() {
+    const area = document.getElementById("output-area");
+    if (!area) return;
+    const text = area.innerText;
+    const blob = new Blob([text], { type: "text/plain" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "solarstata_output.log";
+    a.click();
+    toast("Output saved", "success");
+}
+
+function showHelp() {
+    const help = [
+        "SolarSTATA v2.0 - Quick Reference",
+        "=".repeat(40),
+        "",
+        "Keyboard Shortcuts:",
+        "  Ctrl+O     Open file",
+        "  Ctrl+L     Focus command bar",
+        "  Ctrl+1/2/3 Switch tabs",
+        "",
+        "Commands (type in command bar):",
+        "  summarize [vars]",
+        "  ttest var, by(group)",
+        "  oneway dep group",
+        "  tabulate var1 var2",
+        "  regress dep indep1 indep2",
+        "  help",
+        "",
+        "Right panel: click Tests or AI Agent tab.",
+        "Select variables in left panel, then click Smart Analysis.",
+    ];
+    appendOutput("info", "help", help.join("\n"));
+    switchTab("output");
+}
+
+/* ==================================================================
+   6. VARIABLES PANEL
+   ================================================================== */
+function updateVarList() {
     const list = document.getElementById("variables-list");
     const count = document.getElementById("var-count");
-    if (!dataInfo) return;
-
-    const vars = dataInfo.variable_info || [];
+    if (!list) return;
+    const vars = S.dataInfo?.variable_info || [];
     if (count) count.textContent = vars.length;
-
-    list.innerHTML = vars.map((v, i) => {
-        const typeClass = v.Type === "continuous" ? "numeric" : "categorical";
+    S.selectedVars = [];
+    list.innerHTML = vars.map(v => {
+        const tc = v.Type === "continuous" ? "numeric" : "categorical";
         const badge = v.Type === "continuous" ? "num" : "str";
-        return `<div class="var-item" data-var="${v.Variable}" onclick="selectVariable('${v.Variable}', this)">
-            <span class="var-type-badge ${typeClass}">${badge}</span>
-            <span class="var-name">${v.Variable}</span>
+        return `<div class="var-item" data-var="${esc(v.Variable)}">
+            <span class="var-type-icon ${tc}">${badge}</span>
+            <span class="var-name">${esc(v.Variable)}</span>
         </div>`;
     }).join("");
+    list.querySelectorAll(".var-item").forEach(el => {
+        el.addEventListener("click", () => toggleVar(el));
+    });
 }
 
-function selectVariable(varName, el) {
-    const idx = State.selectedVars.indexOf(varName);
-    if (idx >= 0) {
-        State.selectedVars.splice(idx, 1);
-        el.classList.remove("selected");
-    } else {
-        State.selectedVars.push(varName);
-        el.classList.add("selected");
-    }
-    updateSelectedVarsDisplay();
+function toggleVar(el) {
+    const v = el.dataset.var;
+    const i = S.selectedVars.indexOf(v);
+    if (i >= 0) { S.selectedVars.splice(i, 1); el.classList.remove("selected"); }
+    else { S.selectedVars.push(v); el.classList.add("selected"); }
 }
 
-function updateSelectedVarsDisplay() {
-    const disp = document.getElementById("selected-vars-display");
-    if (disp) {
-        disp.textContent = State.selectedVars.length > 0
-            ? State.selectedVars.join(", ")
-            : "None";
-    }
+function initVariableSearch() {
+    const input = document.getElementById("var-search-input");
+    if (!input) return;
+    input.addEventListener("input", () => {
+        const q = input.value.toLowerCase();
+        document.querySelectorAll("#variables-list .var-item").forEach(el => {
+            el.style.display = el.dataset.var.toLowerCase().includes(q) ? "" : "none";
+        });
+    });
 }
 
-// ============================================================
-// DATA TABLE
-// ============================================================
-function renderDataTable(rows, columns) {
-    const container = document.getElementById("data-editor");
+/* ==================================================================
+   7. DATA TABLE
+   ================================================================== */
+function renderDataTable(rows, cols) {
+    const viewer = document.getElementById("data-viewer");
+    if (!viewer) return;
     if (!rows || rows.length === 0) {
-        container.innerHTML = '<div style="padding:20px;color:var(--text-muted);">No data loaded</div>';
+        viewer.innerHTML = '<div class="empty-state"><div class="empty-state-icon">[ ]</div><div class="empty-state-title">No Data</div></div>';
         return;
     }
-
-    let html = '<table class="data-table"><thead><tr><th class="row-num">#</th>';
-    columns.forEach(col => {
-        html += `<th>${col}</th>`;
-    });
-    html += '</tr></thead><tbody>';
-
+    let h = '<table class="data-table"><thead><tr><th class="row-num">#</th>';
+    cols.forEach(c => h += `<th>${esc(c)}</th>`);
+    h += "</tr></thead><tbody>";
     rows.forEach((row, i) => {
-        html += `<tr><td class="row-num">${i + 1}</td>`;
-        columns.forEach(col => {
-            const val = row[col];
-            const display = val === null || val === undefined ? "." : val;
-            html += `<td>${display}</td>`;
+        h += `<tr><td class="row-num">${i + 1}</td>`;
+        cols.forEach(c => {
+            const v = row[c];
+            h += `<td>${v === null || v === undefined ? "." : esc(String(v))}</td>`;
         });
-        html += '</tr>';
+        h += "</tr>";
     });
-
-    html += '</tbody></table>';
-    container.innerHTML = html;
+    h += "</tbody></table>";
+    viewer.innerHTML = h;
 }
 
-async function loadMoreData(page) {
-    try {
-        const resp = await fetch(`/api/data/preview?page=${page}&per_page=100`);
-        const data = await resp.json();
-        if (data.data) {
-            renderDataTable(data.data, data.columns);
-        }
-    } catch (err) {
-        showToast("Failed to load data", "error");
-    }
-}
-
-// ============================================================
-// COMMAND INPUT (Stata-style)
-// ============================================================
+/* ==================================================================
+   8. COMMAND INPUT (Stata-style CLI)
+   ================================================================== */
 function initCommandInput() {
     const input = document.getElementById("command-input");
     if (!input) return;
-
-    input.addEventListener("keydown", (e) => {
-        if (e.key === "Enter") {
-            e.preventDefault();
-            executeCommand(input.value);
-            input.value = "";
-        } else if (e.key === "ArrowUp") {
-            e.preventDefault();
-            navigateHistory(-1, input);
-        } else if (e.key === "ArrowDown") {
-            e.preventDefault();
-            navigateHistory(1, input);
-        }
+    input.addEventListener("keydown", e => {
+        if (e.key === "Enter") { e.preventDefault(); runCommand(input.value); input.value = ""; }
+        else if (e.key === "ArrowUp") { e.preventDefault(); navHistory(-1, input); }
+        else if (e.key === "ArrowDown") { e.preventDefault(); navHistory(1, input); }
     });
 }
 
-function navigateHistory(direction, input) {
-    if (State.commandHistory.length === 0) return;
-    State.historyIndex += direction;
-    if (State.historyIndex < 0) State.historyIndex = 0;
-    if (State.historyIndex >= State.commandHistory.length) {
-        State.historyIndex = State.commandHistory.length;
-        input.value = "";
-        return;
-    }
-    input.value = State.commandHistory[State.historyIndex];
+function navHistory(dir, input) {
+    if (!S.cmdHistory.length) return;
+    S.histIdx += dir;
+    if (S.histIdx < 0) S.histIdx = 0;
+    if (S.histIdx >= S.cmdHistory.length) { S.histIdx = S.cmdHistory.length; input.value = ""; return; }
+    input.value = S.cmdHistory[S.histIdx];
 }
 
-async function executeCommand(cmd) {
+async function runCommand(cmd) {
     cmd = cmd.trim();
     if (!cmd) return;
-
-    State.commandHistory.push(cmd);
-    State.historyIndex = State.commandHistory.length;
-
+    S.cmdHistory.push(cmd);
+    S.histIdx = S.cmdHistory.length;
     appendOutput("command", cmd, "Running...");
     switchTab("output");
-
     try {
-        const resp = await fetch("/api/command", {
+        const r = await fetch("/api/command", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ command: cmd }),
         });
-        const data = await resp.json();
-
-        if (data.error) {
-            updateLastOutput(cmd, data.error, "error");
-        } else {
-            updateLastOutput(cmd, data.result?.output || JSON.stringify(data.result, null, 2));
-        }
+        const d = await r.json();
+        if (d.error) updateLastOutput(d.error, "error");
+        else updateLastOutput(d.result?.output || formatObj(d.result));
     } catch (err) {
-        updateLastOutput(cmd, `Error: ${err.message}`, "error");
+        updateLastOutput(`Error: ${err.message}`, "error");
     }
 }
 
-// ============================================================
-// OUTPUT PANEL
-// ============================================================
+/* ==================================================================
+   9. OUTPUT AREA
+   ================================================================== */
 function appendOutput(type, cmd, text) {
     const area = document.getElementById("output-area");
+    if (!area) return;
     const block = document.createElement("div");
     block.className = "output-block";
-    block.id = `output-${Date.now()}`;
-
     if (type === "command" || type === "use") {
-        block.innerHTML = `<div class="output-command">${escapeHtml(cmd)}</div>
-            <div class="output-result" id="result-${block.id}">${escapeHtml(text || "")}</div>`;
+        block.innerHTML = `<div class="output-command">${esc(cmd)}</div><div class="output-result">${esc(text || "")}</div>`;
     } else {
-        block.innerHTML = `<div class="output-result">${escapeHtml(text || "")}</div>`;
+        block.innerHTML = `<div class="output-result">${esc(text || "")}</div>`;
     }
-
     area.appendChild(block);
     area.scrollTop = area.scrollHeight;
-    return block.id;
 }
 
-function updateLastOutput(cmd, text, type = "result") {
+function updateLastOutput(text, cls) {
     const area = document.getElementById("output-area");
+    if (!area) return;
     const blocks = area.querySelectorAll(".output-block");
     if (blocks.length === 0) return;
-
-    const last = blocks[blocks.length - 1];
-    const resultDiv = last.querySelector(".output-result");
-    if (resultDiv) {
-        resultDiv.className = `output-${type === "error" ? "error" : "result"}`;
-        resultDiv.textContent = text;
-    }
+    const last = blocks[blocks.length - 1].querySelector(".output-result");
+    if (!last) return;
+    last.className = cls === "error" ? "output-error" : "output-result";
+    last.textContent = text;
     area.scrollTop = area.scrollHeight;
 }
 
 function clearOutput() {
-    document.getElementById("output-area").innerHTML = "";
+    const area = document.getElementById("output-area");
+    if (area) area.innerHTML = "";
 }
 
-// ============================================================
-// STATISTICAL TEST DIALOGS
-// ============================================================
+/* ==================================================================
+   10. STAT TEST BUTTONS → GENERIC MODAL
+   ================================================================== */
+
+// Maps data-test attribute → { title, buildForm, run }
+const TEST_CONFIG = {
+    descriptive: {
+        title: "Descriptive Statistics",
+        build: () => formMultiVar("desc-vars", "numeric") + formCheck("desc-detail", "Detailed output", true),
+        run: () => apiRun("/api/stats/descriptive", {
+            variables: multiVal("desc-vars"), detail: isChecked("desc-detail")
+        }, "summarize"),
+    },
+    tabulate: {
+        title: "Tabulate",
+        build: () => formVar("tab-var1", "Variable 1", "any") + formVar("tab-var2", "Variable 2 (optional)", "any"),
+        run: () => apiRun("/api/stats/tabulate", {
+            var1: val("tab-var1"), var2: val("tab-var2")
+        }, "tabulate"),
+    },
+    normality: {
+        title: "Normality Test",
+        build: () => formVar("norm-var", "Variable", "numeric"),
+        run: () => apiRun("/api/stats/normality", { variable: val("norm-var") }, "swilk"),
+    },
+    ttest_one: {
+        title: "One-Sample T-Test",
+        build: () => formVar("t1-var", "Variable", "numeric") + formNum("t1-mu", "Test value (mu)", 0),
+        run: () => apiRun("/api/stats/ttest", {
+            type: "one_sample", variable: val("t1-var"), mu: numVal("t1-mu")
+        }, "ttest"),
+    },
+    ttest_two: {
+        title: "Two-Sample T-Test",
+        build: () => formVar("t2-var", "Variable", "numeric") + formVar("t2-group", "Group variable", "categorical"),
+        run: () => apiRun("/api/stats/ttest", {
+            type: "two_sample", variable: val("t2-var"), groupvar: val("t2-group")
+        }, "ttest"),
+    },
+    ttest_paired: {
+        title: "Paired T-Test",
+        build: () => formVar("tp-var1", "Variable 1", "numeric") + formVar("tp-var2", "Variable 2", "numeric"),
+        run: () => apiRun("/api/stats/ttest", {
+            type: "paired", var1: val("tp-var1"), var2: val("tp-var2")
+        }, "ttest"),
+    },
+    anova_oneway: {
+        title: "One-Way ANOVA",
+        build: () => formVar("a1-dep", "Dependent variable", "numeric") + formVar("a1-group", "Group variable", "categorical"),
+        run: () => apiRun("/api/stats/anova", {
+            type: "oneway", depvar: val("a1-dep"), groupvar: val("a1-group")
+        }, "oneway"),
+    },
+    anova_twoway: {
+        title: "Two-Way ANOVA",
+        build: () => formVar("a2-dep", "Dependent variable", "numeric") +
+            formVar("a2-f1", "Factor 1", "categorical") +
+            formVar("a2-f2", "Factor 2", "categorical") +
+            formCheck("a2-int", "Include interaction", true),
+        run: () => apiRun("/api/stats/anova", {
+            type: "twoway", depvar: val("a2-dep"), factor1: val("a2-f1"),
+            factor2: val("a2-f2"), interaction: isChecked("a2-int")
+        }, "anova"),
+    },
+    chi_square: {
+        title: "Chi-Square Test",
+        build: () => formVar("chi-v1", "Variable 1", "categorical") + formVar("chi-v2", "Variable 2", "categorical"),
+        run: () => apiRun("/api/stats/chi_square", {
+            var1: val("chi-v1"), var2: val("chi-v2")
+        }, "tabulate, chi2"),
+    },
+    fisher: {
+        title: "Fisher's Exact Test",
+        build: () => formVar("fish-v1", "Variable 1", "categorical") + formVar("fish-v2", "Variable 2", "categorical"),
+        run: () => apiRun("/api/stats/fisher", {
+            var1: val("fish-v1"), var2: val("fish-v2")
+        }, "tabulate, exact"),
+    },
+    regression: {
+        title: "OLS Regression",
+        build: () => formVar("reg-dep", "Dependent variable", "numeric") +
+            formMultiVar("reg-ind", "numeric") + formCheck("reg-robust", "Robust SE", false),
+        run: () => apiRun("/api/stats/regression", {
+            type: "ols", depvar: val("reg-dep"), indepvars: multiVal("reg-ind"), robust: isChecked("reg-robust")
+        }, "regress"),
+    },
+    logistic: {
+        title: "Logistic Regression",
+        build: () => formVar("logit-dep", "Dependent (binary)", "categorical") + formMultiVar("logit-ind", "numeric"),
+        run: () => apiRun("/api/stats/regression", {
+            type: "logistic", depvar: val("logit-dep"), indepvars: multiVal("logit-ind")
+        }, "logistic"),
+    },
+    probit: {
+        title: "Probit Regression",
+        build: () => formVar("probit-dep", "Dependent (binary)", "categorical") + formMultiVar("probit-ind", "numeric"),
+        run: () => apiRun("/api/stats/regression", {
+            type: "probit", depvar: val("probit-dep"), indepvars: multiVal("probit-ind")
+        }, "probit"),
+    },
+    mann_whitney: {
+        title: "Mann-Whitney U Test",
+        build: () => formVar("mw-var", "Variable", "numeric") + formVar("mw-group", "Group variable", "categorical"),
+        run: () => apiRun("/api/stats/nonparametric", {
+            test: "mann_whitney", variable: val("mw-var"), groupvar: val("mw-group")
+        }, "ranksum"),
+    },
+    wilcoxon: {
+        title: "Wilcoxon Signed-Rank Test",
+        build: () => formVar("wil-v1", "Variable 1", "numeric") + formVar("wil-v2", "Variable 2", "numeric"),
+        run: () => apiRun("/api/stats/nonparametric", {
+            test: "wilcoxon", var1: val("wil-v1"), var2: val("wil-v2")
+        }, "signrank"),
+    },
+    kruskal_wallis: {
+        title: "Kruskal-Wallis Test",
+        build: () => formVar("kw-var", "Variable", "numeric") + formVar("kw-group", "Group variable", "categorical"),
+        run: () => apiRun("/api/stats/nonparametric", {
+            test: "kruskal_wallis", variable: val("kw-var"), groupvar: val("kw-group")
+        }, "kwallis"),
+    },
+    correlation: {
+        title: "Correlation",
+        build: () => formMultiVar("corr-vars", "numeric") +
+            `<div class="form-group"><label>Method</label><select class="form-control" id="corr-method">
+                <option value="pearson">Pearson</option><option value="spearman">Spearman</option>
+                <option value="kendall">Kendall</option></select></div>`,
+        run: () => apiRun("/api/stats/correlation", {
+            variables: multiVal("corr-vars"), method: val("corr-method")
+        }, "correlate"),
+    },
+    tukey: {
+        title: "Tukey HSD Post-Hoc",
+        build: () => formVar("tukey-dep", "Dependent variable", "numeric") + formVar("tukey-group", "Group variable", "categorical"),
+        run: () => apiRun("/api/stats/posthoc", {
+            method: "tukey", depvar: val("tukey-dep"), groupvar: val("tukey-group")
+        }, "tukey"),
+    },
+    bonferroni: {
+        title: "Bonferroni Post-Hoc",
+        build: () => formVar("bon-dep", "Dependent variable", "numeric") + formVar("bon-group", "Group variable", "categorical"),
+        run: () => apiRun("/api/stats/posthoc", {
+            method: "bonferroni", depvar: val("bon-dep"), groupvar: val("bon-group")
+        }, "bonferroni"),
+    },
+    rm_anova: {
+        title: "Repeated Measures ANOVA",
+        build: () => formMultiVar("rm-vars", "numeric") +
+            formVar("rm-subj", "Subject variable (optional)", "any"),
+        run: () => apiRun("/api/stats/repeated", {
+            type: "rm_anova", variables: multiVal("rm-vars"), subject_var: val("rm-subj") || null
+        }, "rm anova"),
+    },
+    friedman: {
+        title: "Friedman Test",
+        build: () => formMultiVar("fried-vars", "numeric") +
+            formVar("fried-subj", "Subject variable (optional)", "any"),
+        run: () => apiRun("/api/stats/repeated", {
+            type: "friedman", variables: multiVal("fried-vars"), subject_var: val("fried-subj") || null
+        }, "friedman"),
+    },
+    kaplan_meier: {
+        title: "Kaplan-Meier Survival",
+        build: () => formVar("km-time", "Time variable", "numeric") +
+            formVar("km-event", "Event variable", "any") +
+            formVar("km-group", "Group variable (optional)", "categorical"),
+        run: () => apiRun("/api/stats/survival", {
+            type: "kaplan_meier", time_var: val("km-time"),
+            event_var: val("km-event"), group_var: val("km-group") || null
+        }, "sts graph"),
+    },
+    cox: {
+        title: "Cox Proportional Hazards",
+        build: () => formVar("cox-time", "Time variable", "numeric") +
+            formVar("cox-event", "Event variable", "any") +
+            formMultiVar("cox-cov", "numeric"),
+        run: () => apiRun("/api/stats/survival", {
+            type: "cox", time_var: val("cox-time"),
+            event_var: val("cox-event"), covariates: multiVal("cox-cov")
+        }, "stcox"),
+    },
+    power: {
+        title: "Power Analysis",
+        build: () =>
+            `<div class="form-group"><label>Test type</label><select class="form-control" id="pow-test">
+                <option value="t-test">T-Test</option><option value="anova">ANOVA</option>
+                <option value="chi-square">Chi-Square</option></select></div>` +
+            formNum("pow-n", "Sample size per group", 30) +
+            formNum("pow-alpha", "Alpha", 0.05) +
+            formNum("pow-delta", "Effect size (delta or f)", 0.5) +
+            formNum("pow-sd", "Standard deviation", 1),
+        run: () => apiRun("/api/stats/power", {
+            test_type: val("pow-test"),
+            n: numVal("pow-n"), alpha: numVal("pow-alpha"),
+            delta: numVal("pow-delta"), sd: numVal("pow-sd")
+        }, "power"),
+    },
+    sample_size: {
+        title: "Sample Size Calculator",
+        build: () =>
+            `<div class="form-group"><label>Test type</label><select class="form-control" id="ss-test">
+                <option value="t-test">T-Test</option><option value="anova">ANOVA</option>
+                <option value="chi-square">Chi-Square</option><option value="proportion">Proportion</option></select></div>` +
+            formNum("ss-effect", "Effect size", 0.5) +
+            formNum("ss-sd2", "SD (if applicable)", 1) +
+            formNum("ss-alpha2", "Alpha", 0.05) +
+            formNum("ss-power2", "Desired power", 0.80) +
+            formNum("ss-groups", "Number of groups", 2),
+        run: () => apiRun("/api/stats/sample_size", {
+            test_type: val("ss-test"),
+            effect_size: numVal("ss-effect"), sd: numVal("ss-sd2"),
+            alpha: numVal("ss-alpha2"), power: numVal("ss-power2"),
+            k_groups: numVal("ss-groups")
+        }, "power sampsi"),
+    },
+};
+
+function initTestButtons() {
+    document.querySelectorAll("[data-test]").forEach(btn => {
+        btn.addEventListener("click", () => openStatModal(btn.dataset.test));
+    });
+    document.getElementById("btn-smart")?.addEventListener("click", runSmartAnalysis);
+}
+
+function openStatModal(testKey) {
+    const cfg = TEST_CONFIG[testKey];
+    if (!cfg) { toast(`Unknown test: ${testKey}`, "error"); return; }
+    if (!S.loaded && !["power", "sample_size"].includes(testKey)) {
+        toast("Load data first", "error"); return;
+    }
+    S.curTest = testKey;
+    document.getElementById("stat-modal-title").textContent = cfg.title;
+    document.getElementById("stat-modal-body").innerHTML = cfg.build();
+    populateSelectors();
+    openModal("stat-modal");
+}
+
+/* ==================================================================
+   11. AGENT BUTTONS
+   ================================================================== */
+function initAgentButtons() {
+    document.getElementById("btn-universal")?.addEventListener("click", () => openModal("universal-modal"));
+    document.getElementById("btn-ai-analyze")?.addEventListener("click", () => {
+        if (!S.loaded) { toast("Load data first", "error"); return; }
+        openModal("ai-modal");
+    });
+    document.getElementById("btn-messy-data")?.addEventListener("click", () => {
+        if (!S.loaded) { toast("Load data first", "error"); return; }
+        openModal("messy-modal");
+    });
+    document.getElementById("btn-sample-size-text")?.addEventListener("click", () => openModal("sample-size-modal"));
+    document.getElementById("btn-lit-review")?.addEventListener("click", () => openModal("lit-modal"));
+
+    // Run buttons in agent modals
+    document.getElementById("universal-run-btn")?.addEventListener("click", runUniversalAnalysis);
+    document.getElementById("universal-file-btn")?.addEventListener("click", () => {
+        document.getElementById("universal-file-input")?.click();
+    });
+    document.getElementById("universal-file-input")?.addEventListener("change", handleUniversalFile);
+    document.getElementById("ai-run-btn")?.addEventListener("click", runAIAnalysis);
+    document.getElementById("ss-run-btn")?.addEventListener("click", runSampleSizeText);
+    document.getElementById("messy-run-btn")?.addEventListener("click", runMessyData);
+    document.getElementById("lit-run-btn")?.addEventListener("click", runLitReview);
+}
+
+/* ==================================================================
+   12. MODAL SYSTEM
+   ================================================================== */
+function initModals() {
+    // Close on backdrop click
+    document.querySelectorAll(".modal-overlay").forEach(overlay => {
+        overlay.addEventListener("click", e => {
+            if (e.target === overlay) overlay.classList.remove("active");
+        });
+    });
+    // Close on X button
+    document.querySelectorAll("[data-dismiss]").forEach(btn => {
+        btn.addEventListener("click", () => closeModal(btn.dataset.dismiss));
+    });
+    // Stat modal run button
+    document.getElementById("stat-modal-run")?.addEventListener("click", () => {
+        if (S.curTest && TEST_CONFIG[S.curTest]) {
+            closeModal("stat-modal");
+            TEST_CONFIG[S.curTest].run();
+        }
+    });
+}
+
 function openModal(id) {
-    document.getElementById(id).classList.add("active");
-    populateVarSelectors();
+    document.getElementById(id)?.classList.add("active");
 }
 
 function closeModal(id) {
-    document.getElementById(id).classList.remove("active");
+    document.getElementById(id)?.classList.remove("active");
 }
 
-function populateVarSelectors() {
-    document.querySelectorAll(".var-selector").forEach(select => {
-        const current = select.value;
-        const type = select.dataset.type; // "numeric", "categorical", "any"
-        let vars = State.columns;
+/* ==================================================================
+   13. FORM BUILDERS (for generic stat modal)
+   ================================================================== */
+function formVar(id, label, type) {
+    return `<div class="form-group"><label>${label}</label>
+        <select class="form-control var-selector" id="${id}" data-type="${type}">
+        <option value="">-- Select --</option></select></div>`;
+}
 
-        if (type === "numeric" && State.dataInfo) {
-            vars = State.dataInfo.numeric_columns || State.columns;
-        } else if (type === "categorical" && State.dataInfo) {
-            vars = State.dataInfo.categorical_columns || State.columns;
-        }
+function formMultiVar(id, type) {
+    return `<div class="form-group"><label>Variables</label>
+        <select class="form-control var-multi-selector" id="${id}" data-type="${type}" multiple size="5">
+        </select><div class="form-hint">Hold Ctrl/Cmd to select multiple</div></div>`;
+}
 
-        select.innerHTML = '<option value="">-- Select Variable --</option>';
+function formNum(id, label, defaultVal) {
+    return `<div class="form-group"><label>${label}</label>
+        <input class="form-control" type="number" id="${id}" value="${defaultVal}" step="any"></div>`;
+}
+
+function formCheck(id, label, checked) {
+    return `<div class="form-check"><input type="checkbox" id="${id}" ${checked ? "checked" : ""}>
+        <label for="${id}">${label}</label></div>`;
+}
+
+function populateSelectors() {
+    document.querySelectorAll(".var-selector").forEach(sel => {
+        const type = sel.dataset.type;
+        let vars = S.columns;
+        if (type === "numeric" && S.dataInfo) vars = S.dataInfo.numeric_columns || S.columns;
+        else if (type === "categorical" && S.dataInfo) vars = S.dataInfo.categorical_columns || S.columns;
+        const cur = sel.value;
+        sel.innerHTML = '<option value="">-- Select --</option>';
         vars.forEach(v => {
             const opt = document.createElement("option");
-            opt.value = v;
-            opt.textContent = v;
-            if (v === current) opt.selected = true;
-            select.appendChild(opt);
+            opt.value = v; opt.textContent = v;
+            if (v === cur) opt.selected = true;
+            sel.appendChild(opt);
         });
     });
-
-    // Multi-selects
-    document.querySelectorAll(".var-multi-selector").forEach(select => {
-        const type = select.dataset.type;
-        let vars = State.columns;
-        if (type === "numeric" && State.dataInfo) {
-            vars = State.dataInfo.numeric_columns || State.columns;
-        }
-        select.innerHTML = "";
+    document.querySelectorAll(".var-multi-selector").forEach(sel => {
+        const type = sel.dataset.type;
+        let vars = S.columns;
+        if (type === "numeric" && S.dataInfo) vars = S.dataInfo.numeric_columns || S.columns;
+        sel.innerHTML = "";
         vars.forEach(v => {
             const opt = document.createElement("option");
-            opt.value = v;
-            opt.textContent = v;
-            select.appendChild(opt);
+            opt.value = v; opt.textContent = v;
+            sel.appendChild(opt);
         });
     });
 }
 
-// ---- Run Tests ----
-
-async function runDescriptive() {
-    const vars = getMultiSelectValues("desc-vars");
-    const detail = document.getElementById("desc-detail")?.checked || true;
-    closeModal("modal-descriptive");
-
-    await apiPost("/api/stats/descriptive", { variables: vars.length ? vars : null, detail },
-        `summarize ${vars.join(" ")}`);
+function val(id) { return document.getElementById(id)?.value || ""; }
+function numVal(id) { return parseFloat(document.getElementById(id)?.value) || 0; }
+function isChecked(id) { return document.getElementById(id)?.checked || false; }
+function multiVal(id) {
+    const sel = document.getElementById(id);
+    if (!sel) return [];
+    return Array.from(sel.selectedOptions).map(o => o.value);
 }
 
-async function runTTest() {
-    const testType = document.getElementById("ttest-type").value;
-    let payload = { type: testType };
-
-    if (testType === "two_sample") {
-        payload.variable = document.getElementById("ttest-var").value;
-        payload.groupvar = document.getElementById("ttest-group").value;
-    } else if (testType === "one_sample") {
-        payload.variable = document.getElementById("ttest-var").value;
-        payload.mu = parseFloat(document.getElementById("ttest-mu").value) || 0;
-    } else if (testType === "paired") {
-        payload.var1 = document.getElementById("ttest-var1").value;
-        payload.var2 = document.getElementById("ttest-var2").value;
-    }
-
-    closeModal("modal-ttest");
-    await apiPost("/api/stats/ttest", payload, `ttest`);
-}
-
-async function runANOVA() {
-    const anovaType = document.getElementById("anova-type").value;
-    let payload = { type: anovaType };
-
-    if (anovaType === "oneway") {
-        payload.depvar = document.getElementById("anova-depvar").value;
-        payload.groupvar = document.getElementById("anova-groupvar").value;
-    } else {
-        payload.depvar = document.getElementById("anova-depvar").value;
-        payload.factor1 = document.getElementById("anova-factor1").value;
-        payload.factor2 = document.getElementById("anova-factor2").value;
-        payload.interaction = document.getElementById("anova-interaction")?.checked ?? true;
-    }
-
-    closeModal("modal-anova");
-    await apiPost("/api/stats/anova", payload, `oneway/anova`);
-}
-
-async function runChiSquare() {
-    const var1 = document.getElementById("chi-var1").value;
-    const var2 = document.getElementById("chi-var2").value;
-    closeModal("modal-chi");
-    await apiPost("/api/stats/chi_square", { var1, var2 }, `tabulate ${var1} ${var2}, chi2`);
-}
-
-async function runRegression() {
-    const regType = document.getElementById("reg-type").value;
-    const depvar = document.getElementById("reg-depvar").value;
-    const indepvars = getMultiSelectValues("reg-indepvars");
-    const robust = document.getElementById("reg-robust")?.checked || false;
-
-    closeModal("modal-regression");
-    await apiPost("/api/stats/regression",
-        { type: regType, depvar, indepvars, robust },
-        `${regType === "ols" ? "regress" : regType} ${depvar} ${indepvars.join(" ")}`);
-}
-
-async function runCorrelation() {
-    const variables = getMultiSelectValues("corr-vars");
-    const method = document.getElementById("corr-method").value;
-    closeModal("modal-correlation");
-    await apiPost("/api/stats/correlation", { variables, method }, `correlate ${variables.join(" ")}`);
-}
-
-async function runNonParametric() {
-    const test = document.getElementById("np-test").value;
-    let payload = { test };
-
-    if (test === "mann_whitney" || test === "kruskal_wallis") {
-        payload.variable = document.getElementById("np-var").value;
-        payload.groupvar = document.getElementById("np-group").value;
-    } else if (test === "wilcoxon") {
-        payload.var1 = document.getElementById("np-var1").value;
-        payload.var2 = document.getElementById("np-var2").value;
-    }
-
-    closeModal("modal-nonparametric");
-    await apiPost("/api/stats/nonparametric", payload, `${test}`);
-}
-
-async function runSurvival() {
-    const sType = document.getElementById("surv-type").value;
-    let payload = {
-        type: sType,
-        time_var: document.getElementById("surv-time").value,
-        event_var: document.getElementById("surv-event").value,
-    };
-
-    if (sType === "cox") {
-        payload.covariates = getMultiSelectValues("surv-covariates");
-    } else {
-        const gv = document.getElementById("surv-group").value;
-        if (gv) payload.group_var = gv;
-    }
-
-    closeModal("modal-survival");
-    await apiPost("/api/stats/survival", payload, `sts/stcox`);
-}
-
-async function runPower() {
-    const testType = document.getElementById("power-test").value;
-    let payload = { test_type: testType };
-
-    const fields = ["n", "delta", "sd", "alpha", "power", "k", "f_effect", "w", "df"];
-    fields.forEach(f => {
-        const el = document.getElementById(`power-${f}`);
-        if (el && el.value) payload[f] = parseFloat(el.value);
-    });
-
-    closeModal("modal-power");
-    await apiPost("/api/stats/power", payload, `power ${testType}`);
-}
-
-async function runSampleSize() {
-    const payload = {
-        test_type: document.getElementById("ss-test").value,
-        study_type: document.getElementById("ss-study").value,
-        effect_size: parseFloat(document.getElementById("ss-effect").value) || null,
-        sd: parseFloat(document.getElementById("ss-sd").value) || null,
-        alpha: parseFloat(document.getElementById("ss-alpha").value) || 0.05,
-        power: parseFloat(document.getElementById("ss-power").value) || 0.80,
-        p1: parseFloat(document.getElementById("ss-p1").value) || null,
-        p2: parseFloat(document.getElementById("ss-p2").value) || null,
-        k_groups: parseInt(document.getElementById("ss-groups").value) || 2,
-    };
-
-    closeModal("modal-samplesize");
-    await apiPost("/api/stats/sample_size", payload, `power sample_size`);
-}
-
-// ---- API helper ----
-async function apiPost(url, payload, cmdLabel) {
+/* ==================================================================
+   14. API HELPER
+   ================================================================== */
+async function apiRun(url, payload, label) {
     switchTab("output");
-    appendOutput("command", cmdLabel, "Computing...");
-
+    appendOutput("command", label, "Computing...");
     try {
-        const resp = await fetch(url, {
+        const r = await fetch(url, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(payload),
         });
-        const data = await resp.json();
-
-        if (data.error) {
-            updateLastOutput(cmdLabel, data.error, "error");
-            showToast(data.error, "error");
+        const d = await r.json();
+        if (d.error) {
+            updateLastOutput(d.error, "error");
+            toast(d.error, "error");
         } else {
-            const result = data.result;
-            let output = "";
-            if (typeof result === "string") {
-                output = result;
-            } else if (result?.output) {
-                output = result.output;
-            } else if (result?.result_str) {
-                output = result.result_str;
-            } else if (result?.summary) {
-                output = result.summary;
-            } else if (result?.stdout) {
-                output = result.stdout;
-            } else {
-                output = formatResult(result);
-            }
-            updateLastOutput(cmdLabel, output);
+            updateLastOutput(formatResult(d.result));
         }
     } catch (err) {
-        updateLastOutput(cmdLabel, `Error: ${err.message}`, "error");
+        updateLastOutput(`Error: ${err.message}`, "error");
     }
 }
 
+/* ==================================================================
+   15. RESULT FORMATTING
+   ================================================================== */
 function formatResult(obj) {
-    if (obj === null || obj === undefined) return "No result";
+    if (obj == null) return "No result";
     if (typeof obj === "string") return obj;
-
-    // Check for pre-formatted output keys
     if (obj.output) return obj.output;
     if (obj.result_str) return obj.result_str;
     if (obj.summary) return obj.summary;
     if (obj.stdout) return obj.stdout;
-
-    // Format arrays as tables
     if (Array.isArray(obj)) return formatTable(obj);
-
-    // Smart formatting for stat result dicts
-    try {
-        return formatStatResult(obj);
-    } catch {
-        try {
-            return JSON.stringify(obj, null, 2);
-        } catch {
-            return String(obj);
-        }
-    }
+    return formatStatResult(obj);
 }
 
 function formatStatResult(obj) {
-    let lines = [];
+    const L = [];
+    // Test header
+    if (obj.test) { L.push(`  Test: ${obj.test}`); L.push("  " + "=".repeat(50)); }
+    if (obj.error) { L.push(`  Error: ${obj.error}`); return L.join("\n"); }
 
-    // Test name / header
-    if (obj.test) {
-        lines.push(`  Test: ${obj.test}`);
-        lines.push("  " + "=".repeat(50));
-    }
-
-    // Error handling
-    if (obj.error) {
-        lines.push(`  Error: ${obj.error}`);
-        return lines.join("\n");
-    }
-
-    // T-test results
+    // T-test
     if (obj.t_stat !== undefined || obj.t !== undefined) {
         const t = obj.t_stat ?? obj.t;
-        lines.push("");
-        if (obj.Variable) lines.push(`  Variable: ${obj.Variable}`);
-        if (obj.Obs) lines.push(`  Obs: ${obj.Obs}`);
-        if (obj.Mean !== undefined) lines.push(`  Mean: ${obj.Mean}`);
-        if (obj["Std. Err."] !== undefined) lines.push(`  Std. Err.: ${obj["Std. Err."]}`);
-        if (obj["95% CI"]) lines.push(`  95% CI: [${obj["95% CI"].join(", ")}]`);
-        lines.push("");
-        lines.push(`  t = ${typeof t === "number" ? t.toFixed(4) : t}`);
-        if (obj.df !== undefined) lines.push(`  df = ${obj.df}`);
-        if (obj.p !== undefined) lines.push(`  p = ${typeof obj.p === "number" ? obj.p.toFixed(6) : obj.p}`);
-        if (obj["p (two-tail)"] !== undefined) lines.push(`  p (two-tail) = ${obj["p (two-tail)"]}`);
-        if (obj.Group_1) lines.push(`\n  Group 1: ${obj.Group_1} (n=${obj.n1}, mean=${obj.mean1})`);
-        if (obj.Group_2) lines.push(`  Group 2: ${obj.Group_2} (n=${obj.n2}, mean=${obj.mean2})`);
-        if (obj.mean_diff !== undefined) lines.push(`  Mean Difference: ${obj.mean_diff}`);
-        return lines.join("\n");
+        L.push("");
+        if (obj.Variable) L.push(`  Variable: ${obj.Variable}`);
+        if (obj.Obs) L.push(`  Obs: ${obj.Obs}`);
+        if (obj.Mean !== undefined) L.push(`  Mean: ${obj.Mean}`);
+        if (obj["Std. Err."] !== undefined) L.push(`  Std. Err.: ${obj["Std. Err."]}`);
+        if (obj["95% CI"]) L.push(`  95% CI: [${obj["95% CI"].join(", ")}]`);
+        L.push(""); L.push(`  t = ${n4(t)}`);
+        if (obj.df !== undefined) L.push(`  df = ${obj.df}`);
+        if (obj.p !== undefined) L.push(`  p = ${n6(obj.p)}`);
+        if (obj["p (two-tail)"] !== undefined) L.push(`  p (two-tail) = ${obj["p (two-tail)"]}`);
+        if (obj.Group_1) L.push(`\n  Group 1: ${obj.Group_1} (n=${obj.n1}, mean=${obj.mean1})`);
+        if (obj.Group_2) L.push(`  Group 2: ${obj.Group_2} (n=${obj.n2}, mean=${obj.mean2})`);
+        if (obj.mean_diff !== undefined) L.push(`  Mean Difference: ${obj.mean_diff}`);
+        return L.join("\n");
     }
 
-    // Chi-square results
+    // Chi-square
     if (obj.chi2 !== undefined && obj.Pr !== undefined) {
-        lines.push("");
-        lines.push(`  Pearson chi2(${obj.df ?? "?"}) = ${obj.chi2}`);
-        lines.push(`  Pr = ${obj.Pr}`);
-        if (obj.cramers_v !== undefined) lines.push(`  Cramer's V = ${obj.cramers_v}`);
-        if (obj.observed_str) lines.push(`\n  Observed:\n${obj.observed_str}`);
-        if (obj.expected_str) lines.push(`\n  Expected:\n${obj.expected_str}`);
-        return lines.join("\n");
+        L.push(""); L.push(`  Pearson chi2(${obj.df ?? "?"}) = ${obj.chi2}`);
+        L.push(`  Pr = ${obj.Pr}`);
+        if (obj.cramers_v !== undefined) L.push(`  Cramer's V = ${obj.cramers_v}`);
+        if (obj.observed_str) L.push(`\n  Observed:\n${obj.observed_str}`);
+        if (obj.expected_str) L.push(`\n  Expected:\n${obj.expected_str}`);
+        return L.join("\n");
     }
 
-    // Fisher's exact
-    if (obj.odds_ratio !== undefined && obj.p !== undefined && !obj.t_stat) {
-        lines.push("");
-        lines.push(`  Odds Ratio: ${obj.odds_ratio}`);
-        lines.push(`  p-value: ${obj.p}`);
-        if (obj["95% CI"]) lines.push(`  95% CI: [${obj["95% CI"].join(", ")}]`);
-        if (obj.observed_str) lines.push(`\n${obj.observed_str}`);
-        return lines.join("\n");
+    // Fisher
+    if (obj.odds_ratio !== undefined && obj.p !== undefined && obj.t_stat === undefined) {
+        L.push(""); L.push(`  Odds Ratio: ${obj.odds_ratio}`);
+        L.push(`  p-value: ${obj.p}`);
+        if (obj["95% CI"]) L.push(`  95% CI: [${obj["95% CI"].join(", ")}]`);
+        return L.join("\n");
     }
 
-    // Normality test
-    if (obj.Skewness_z !== undefined || obj.Shapiro_W !== undefined) {
-        lines.push("");
-        if (obj.Variable) lines.push(`  Variable: ${obj.Variable}`);
-        if (obj.Obs) lines.push(`  Obs: ${obj.Obs}`);
-        if (obj.Shapiro_W !== undefined) lines.push(`  Shapiro-Wilk W = ${obj.Shapiro_W}`);
-        if (obj.Shapiro_p !== undefined) lines.push(`  Shapiro-Wilk p = ${obj.Shapiro_p}`);
-        if (obj.Skewness_z !== undefined) lines.push(`  Skewness z = ${obj.Skewness_z}`);
-        if (obj.Kurtosis_z !== undefined) lines.push(`  Kurtosis z = ${obj.Kurtosis_z}`);
-        if (obj.Kurtosis_p !== undefined) lines.push(`  Kurtosis p = ${obj.Kurtosis_p}`);
-        if (obj.normal !== undefined) lines.push(`\n  Normal: ${obj.normal ? "Yes (p >= 0.05)" : "No (p < 0.05)"}`);
-        return lines.join("\n");
+    // Normality
+    if (obj.Shapiro_W !== undefined) {
+        L.push("");
+        if (obj.Variable) L.push(`  Variable: ${obj.Variable}`);
+        L.push(`  Shapiro-Wilk W = ${obj.Shapiro_W}`);
+        if (obj.Shapiro_p !== undefined) L.push(`  Shapiro-Wilk p = ${obj.Shapiro_p}`);
+        if (obj.normal !== undefined) L.push(`\n  Normal: ${obj.normal ? "Yes" : "No"}`);
+        return L.join("\n");
     }
 
-    // Nonparametric: Mann-Whitney, Kruskal-Wallis, Wilcoxon
+    // Mann-Whitney
     if (obj.U !== undefined) {
-        lines.push(`\n  U = ${obj.U}`);
-        lines.push(`  p = ${obj.p}`);
-        if (obj.Group_1) lines.push(`  ${obj.Group_1}: n=${obj.n1}, median=${obj.median1 ?? "N/A"}, mean_rank=${obj.mean_rank1 ?? "N/A"}`);
-        if (obj.Group_2) lines.push(`  ${obj.Group_2}: n=${obj.n2}, median=${obj.median2 ?? "N/A"}, mean_rank=${obj.mean_rank2 ?? "N/A"}`);
-        return lines.join("\n");
+        L.push(`\n  U = ${obj.U}`); L.push(`  p = ${obj.p}`);
+        if (obj.Group_1) L.push(`  ${obj.Group_1}: n=${obj.n1}, median=${obj.median1 ?? "N/A"}`);
+        if (obj.Group_2) L.push(`  ${obj.Group_2}: n=${obj.n2}, median=${obj.median2 ?? "N/A"}`);
+        return L.join("\n");
     }
+
+    // Kruskal-Wallis
     if (obj.H !== undefined) {
-        lines.push(`\n  H = ${obj.H}`);
-        lines.push(`  df = ${obj.df}`);
-        lines.push(`  p = ${obj.p}`);
-        if (obj.groups) {
-            lines.push("");
-            obj.groups.forEach(g => {
-                lines.push(`  ${g.Group}: n=${g.N}, median=${g.Median ?? "N/A"}, mean_rank=${g.Mean_Rank ?? "N/A"}`);
-            });
-        }
-        return lines.join("\n");
-    }
-    if (obj.T !== undefined && obj.p !== undefined && !obj.t_stat) {
-        lines.push(`\n  T = ${obj.T}`);
-        lines.push(`  p = ${obj.p}`);
-        if (obj.n) lines.push(`  n = ${obj.n}`);
-        return lines.join("\n");
+        L.push(`\n  H = ${obj.H}`); L.push(`  df = ${obj.df}`); L.push(`  p = ${obj.p}`);
+        if (obj.groups) obj.groups.forEach(g => L.push(`  ${g.Group}: n=${g.N}, median=${g.Median ?? "N/A"}`));
+        return L.join("\n");
     }
 
-    // Correlation matrix
+    // Wilcoxon
+    if (obj.T !== undefined && obj.p !== undefined && obj.t_stat === undefined) {
+        L.push(`\n  T = ${obj.T}`); L.push(`  p = ${obj.p}`);
+        return L.join("\n");
+    }
+
+    // Correlation
     if (obj.correlation_str) {
-        lines.push("");
-        lines.push(obj.correlation_str);
-        if (obj.p_values_str) {
-            lines.push("\n  P-values:");
-            lines.push(obj.p_values_str);
-        }
-        return lines.join("\n");
+        L.push(""); L.push(obj.correlation_str);
+        if (obj.p_values_str) { L.push("\n  P-values:"); L.push(obj.p_values_str); }
+        return L.join("\n");
     }
 
-    // Post-hoc: Tukey / Bonferroni
+    // Post-hoc comparisons
     if (obj.comparisons && Array.isArray(obj.comparisons)) {
-        if (obj.test) lines.push("");
-        lines.push(`  ${"Comparison".padEnd(30)} ${"Diff".padStart(10)} ${"p-value".padStart(12)} Sig`);
-        lines.push("  " + "-".repeat(58));
+        L.push(`  ${"Comparison".padEnd(30)} ${"Diff".padStart(10)} ${"p-value".padStart(12)} Sig`);
+        L.push("  " + "-".repeat(58));
         obj.comparisons.forEach(c => {
             const comp = `${c.group1 || c.Group1} vs ${c.group2 || c.Group2}`;
             const diff = c.mean_diff ?? c.meandiff ?? c.diff ?? "";
-            const p = c.p_adj ?? c.p ?? c["p-adj"] ?? "";
+            const p = c.p_adj ?? c.p ?? "";
             const sig = (c.significant || c.reject) ? " ***" : "";
-            const diffStr = typeof diff === "number" ? diff.toFixed(4) : String(diff);
-            const pStr = typeof p === "number" ? p.toFixed(6) : String(p);
-            lines.push(`  ${comp.padEnd(30)} ${diffStr.padStart(10)} ${pStr.padStart(12)}${sig}`);
+            L.push(`  ${comp.padEnd(30)} ${n4s(diff).padStart(10)} ${n6s(p).padStart(12)}${sig}`);
         });
-        return lines.join("\n");
+        return L.join("\n");
     }
 
-    // Power analysis
+    // Power / Sample size
     if (obj.power !== undefined && obj.n !== undefined) {
-        lines.push("");
-        lines.push(`  Power: ${obj.power}`);
-        lines.push(`  N per group: ${obj.n}`);
-        if (obj.effect_size !== undefined) lines.push(`  Effect size: ${obj.effect_size}`);
-        if (obj.alpha !== undefined) lines.push(`  Alpha: ${obj.alpha}`);
-        return lines.join("\n");
+        L.push(""); L.push(`  Power: ${obj.power}`); L.push(`  N per group: ${obj.n}`);
+        if (obj.effect_size !== undefined) L.push(`  Effect size: ${obj.effect_size}`);
+        if (obj.alpha !== undefined) L.push(`  Alpha: ${obj.alpha}`);
+        return L.join("\n");
     }
 
-    // Repeated measures / Friedman
+    // Repeated measures
     if (obj.F !== undefined && obj.p_value !== undefined) {
-        lines.push("");
-        lines.push(`  F = ${obj.F}`);
-        lines.push(`  p = ${obj.p_value}`);
-        if (obj.condition_stats && Array.isArray(obj.condition_stats)) {
-            lines.push(`\n  ${"Condition".padEnd(20)} ${"N".padStart(6)} ${"Mean".padStart(12)} ${"SD".padStart(12)}`);
-            lines.push("  " + "-".repeat(50));
-            obj.condition_stats.forEach(cs => {
-                const name = cs.Condition || cs.condition || cs.Group || "";
-                lines.push(`  ${String(name).padEnd(20)} ${String(cs.N ?? "").padStart(6)} ${typeof cs.Mean === "number" ? cs.Mean.toFixed(4).padStart(12) : String(cs.Mean ?? "").padStart(12)} ${typeof cs.SD === "number" ? cs.SD.toFixed(4).padStart(12) : String(cs.SD ?? "").padStart(12)}`);
-            });
-        }
-        return lines.join("\n");
+        L.push(""); L.push(`  F = ${obj.F}`); L.push(`  p = ${obj.p_value}`);
+        if (obj.condition_stats) obj.condition_stats.forEach(cs => {
+            L.push(`  ${cs.Condition || cs.condition}: N=${cs.N}, Mean=${n4s(cs.Mean)}, SD=${n4s(cs.SD)}`);
+        });
+        return L.join("\n");
     }
+
+    // Friedman
     if (obj.chi2 !== undefined && obj.p_value !== undefined) {
-        lines.push("");
-        lines.push(`  Chi2 = ${obj.chi2}`);
-        lines.push(`  df = ${obj.df}`);
-        lines.push(`  p = ${obj.p_value}`);
-        if (obj.kendall_w !== undefined) lines.push(`  Kendall's W = ${obj.kendall_w}`);
-        return lines.join("\n");
+        L.push(""); L.push(`  Chi2 = ${obj.chi2}`); L.push(`  df = ${obj.df}`); L.push(`  p = ${obj.p_value}`);
+        if (obj.kendall_w !== undefined) L.push(`  Kendall's W = ${obj.kendall_w}`);
+        return L.join("\n");
     }
 
-    // Fallback: format key-value pairs nicely
-    for (const [key, val] of Object.entries(obj)) {
-        if (val === null || val === undefined) continue;
-        if (typeof val === "object" && !Array.isArray(val)) {
-            lines.push(`\n  ${key}:`);
-            for (const [k2, v2] of Object.entries(val)) {
-                if (typeof v2 === "object" && v2 !== null) {
-                    lines.push(`    ${k2}: ${JSON.stringify(v2)}`);
-                } else {
-                    lines.push(`    ${k2}: ${v2}`);
-                }
-            }
-        } else if (Array.isArray(val)) {
-            if (val.length > 0 && typeof val[0] === "object") {
-                lines.push(`\n  ${key}:`);
-                val.forEach((item, i) => {
-                    const entries = Object.entries(item).map(([k, v]) => `${k}=${v}`).join(", ");
-                    lines.push(`    [${i + 1}] ${entries}`);
-                });
-            } else {
-                lines.push(`  ${key}: ${JSON.stringify(val)}`);
-            }
-        } else {
-            lines.push(`  ${key}: ${val}`);
-        }
-    }
-    return lines.join("\n");
+    // Fallback
+    return formatObj(obj);
 }
 
-function getMultiSelectValues(id) {
-    const select = document.getElementById(id);
-    if (!select) return [];
-    return Array.from(select.selectedOptions).map(o => o.value);
-}
-
-// ============================================================
-// AI CHAT
-// ============================================================
-function initAIChat() {
-    const input = document.getElementById("ai-input");
-    if (!input) return;
-
-    input.addEventListener("keydown", (e) => {
-        if (e.key === "Enter" && !e.shiftKey) {
-            e.preventDefault();
-            sendAIMessage();
-        }
+function formatTable(arr) {
+    if (!arr.length) return "[]";
+    const keys = Object.keys(arr[0]);
+    const widths = keys.map(k => Math.max(k.length, ...arr.map(r => String(r[k] ?? "").length)));
+    let h = "  " + keys.map((k, i) => k.padEnd(widths[i])).join("  ") + "\n";
+    h += "  " + widths.map(w => "-".repeat(w)).join("  ") + "\n";
+    arr.forEach(row => {
+        h += "  " + keys.map((k, i) => String(row[k] ?? "").padEnd(widths[i])).join("  ") + "\n";
     });
+    return h;
 }
 
-async function sendAIMessage() {
-    const input = document.getElementById("ai-input");
-    const msg = input.value.trim();
-    if (!msg) return;
-
-    input.value = "";
-    addAIMessage("user", msg);
-
-    const sendBtn = document.getElementById("ai-send-btn");
-    sendBtn.disabled = true;
-    addAIMessage("system", "Analyzing...");
-
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 300000);  // 5 minutes
-
-    try {
-        const resp = await fetch("/api/ai/analyze", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ question: msg, research: true }),
-            signal: controller.signal,
-        });
-        clearTimeout(timeoutId);
-        const data = await resp.json();
-
-        // Remove "Analyzing..." message
-        removeLastAIMessage();
-
-        if (data.error) {
-            addAIMessage("assistant", `Error: ${data.error}`);
-        } else {
-            const result = data.result;
-            let response = "";
-
-            if (result?.stdout) {
-                response = result.stdout;
-                // Also show in output tab
-                appendOutput("command", `ai analyze "${msg.substring(0, 50)}"`, result.stdout);
-            }
-
-            if (result?.suggestions) {
-                response += "\n\nSuggested Tests:\n";
-                result.suggestions.forEach(s => {
-                    response += `  - ${s.test}: ${s.reason}\n`;
-                });
-            }
-
-            if (result?.research && result.research.length > 0) {
-                response += "\n\nRelevant Literature:\n";
-                result.research.forEach(r => {
-                    if (!r.error) {
-                        response += `  - ${r.title || "N/A"} (${r.year || "N/A"})\n`;
-                    }
-                });
-            }
-
-            addAIMessage("assistant", response || "Analysis complete. Check the Output tab for results.");
-        }
-    } catch (err) {
-        clearTimeout(timeoutId);
-        removeLastAIMessage();
-        if (err.name === "AbortError") {
-            addAIMessage("assistant", "Request timed out. Make sure Ollama is installed and running (ollama serve). You can still use the statistical test buttons directly without AI.");
-        } else {
-            addAIMessage("assistant", `Error: ${err.message}. Make sure Ollama is running.`);
-        }
-    }
-
-    sendBtn.disabled = false;
+function formatObj(obj) {
+    if (obj == null) return "No result";
+    try { return JSON.stringify(obj, null, 2); } catch { return String(obj); }
 }
 
-function addAIMessage(role, text) {
-    const chat = document.getElementById("ai-chat-area");
-    const msg = document.createElement("div");
-    msg.className = `ai-message ${role}`;
-    msg.textContent = text;
-    chat.appendChild(msg);
-    chat.scrollTop = chat.scrollHeight;
-}
+function n4(v) { return typeof v === "number" ? v.toFixed(4) : v; }
+function n6(v) { return typeof v === "number" ? v.toFixed(6) : v; }
+function n4s(v) { return typeof v === "number" ? v.toFixed(4) : String(v ?? ""); }
+function n6s(v) { return typeof v === "number" ? v.toFixed(6) : String(v ?? ""); }
 
-function removeLastAIMessage() {
-    const chat = document.getElementById("ai-chat-area");
-    const msgs = chat.querySelectorAll(".ai-message");
-    if (msgs.length > 0) {
-        msgs[msgs.length - 1].remove();
-    }
-}
-
-async function runAIAnalysis() {
-    const proposal = document.getElementById("ai-proposal")?.value || "";
-    if (!State.dataLoaded) {
-        showToast("Please load data first", "error");
-        return;
-    }
-
+/* ==================================================================
+   16. SMART ANALYSIS
+   ================================================================== */
+async function runSmartAnalysis() {
+    if (!S.loaded) { toast("Load data first", "error"); return; }
+    if (S.selectedVars.length === 0) { toast("Select at least one variable", "error"); return; }
     switchTab("output");
-    appendOutput("command", "ai analyze", "Running full AI analysis (this may take up to 5 minutes)...");
-    setStatus("loading", "AI analysis running...");
-
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 300000);  // 5 minutes
-
+    const label = `smart analyze ${S.selectedVars.join(" ")}`;
+    appendOutput("command", label, "Analyzing data structure and selecting test...");
     try {
-        const resp = await fetch("/api/ai/analyze", {
+        const r = await fetch("/api/stats/smart", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ proposal, research: true }),
-            signal: controller.signal,
+            body: JSON.stringify({ columns: S.selectedVars }),
         });
-        clearTimeout(timeoutId);
-        const data = await resp.json();
-
-        if (data.error) {
-            updateLastOutput("ai analyze", data.error, "error");
-            setStatus("error", "AI analysis failed");
-        } else {
-            updateLastOutput("ai analyze", data.result?.stdout || "Complete. See results.");
-            setStatus("ok", "AI analysis complete");
+        const d = await r.json();
+        if (d.error) { updateLastOutput(d.error, "error"); return; }
+        const res = d.result;
+        let out = "=".repeat(60) + "\n  SMART STATISTICAL ROUTER\n" + "=".repeat(60) + "\n\n";
+        if (res.selected_test) out += `  Selected Test: ${res.selected_test}\n`;
+        if (res.reasoning) out += `  Reasoning: ${res.reasoning}\n\n`;
+        if (res.variable_types) {
+            out += "  Variable Classification:\n";
+            Object.entries(res.variable_types).forEach(([v, t]) => out += `    ${v}: ${t}\n`);
+            out += "\n";
         }
+        if (res.result) {
+            out += "  --- Results ---\n";
+            out += (res.result.output || formatResult(res.result)) + "\n\n";
+        }
+        if (res.posthoc) {
+            out += "  --- Post-Hoc ---\n";
+            if (res.posthoc_note) out += `  ${res.posthoc_note}\n`;
+            if (res.posthoc.comparisons) {
+                res.posthoc.comparisons.forEach(c => {
+                    out += `    ${c.Group1} vs ${c.Group2}: diff=${c.Mean_Diff}, p=${c.p_adj || c.p_bonferroni}`;
+                    out += (c.Significant || c.Reject_H0 === "True") ? " *\n" : "\n";
+                });
+            }
+        }
+        out += "=".repeat(60);
+        updateLastOutput(out);
+        toast(`Analysis complete: ${res.selected_test}`, "success");
     } catch (err) {
-        clearTimeout(timeoutId);
-        if (err.name === "AbortError") {
-            updateLastOutput("ai analyze", "Error: AI analysis timed out. The Ollama model may not be running.\n\nTo fix this:\n  1. Install Ollama: https://ollama.com\n  2. Run: ollama pull llama3.2\n  3. Make sure Ollama is running, then try again.\n\nAlternatively, use the individual statistical test buttons (Describe, T-Test, ANOVA, etc.) which work without AI.", "error");
+        updateLastOutput(`Error: ${err.message}`, "error");
+    }
+}
+
+/* ==================================================================
+   17. UNIVERSAL ANALYSIS (3-Stage Pipeline)
+   ================================================================== */
+let universalFile = null;
+
+function handleUniversalFile(e) {
+    const f = e.target.files[0];
+    if (!f) return;
+    const ext = f.name.slice(f.name.lastIndexOf(".")).toLowerCase();
+    if (ext === ".csv") {
+        const reader = new FileReader();
+        reader.onload = ev => {
+            document.getElementById("universal-data-text").value = ev.target.result;
+            universalFile = null;
+        };
+        reader.readAsText(f);
+    } else {
+        universalFile = f;
+        document.getElementById("universal-data-text").value = "";
+        document.getElementById("universal-data-text").placeholder = `File loaded: ${f.name}`;
+    }
+    document.getElementById("universal-file-name").textContent = f.name;
+}
+
+function setStepper(stage, state, text) {
+    const el = document.getElementById(`stage-${stage}`);
+    const icon = document.getElementById(`stage-${stage}-icon`);
+    const status = document.getElementById(`stage-${stage}-status`);
+    if (el) el.className = `progress-stage ${state}`;
+    if (icon) icon.textContent = state === "complete" ? "OK" : state === "error" ? "X" : state === "active" ? "*" : stage;
+    if (status && text) status.textContent = text;
+}
+
+async function runUniversalAnalysis() {
+    const raw = document.getElementById("universal-data-text")?.value || "";
+    const ctx = document.getElementById("universal-context")?.value || "";
+    const tt = document.getElementById("universal-test-type")?.value || "";
+    if (!raw.trim() && !universalFile) { toast("Paste data or upload file", "error"); return; }
+
+    // Show stepper
+    const stepper = document.getElementById("universal-stepper");
+    if (stepper) stepper.style.display = "";
+    setStepper(1, "active", "Organizing...");
+    setStepper(2, "waiting", "Waiting");
+    setStepper(3, "waiting", "Waiting");
+
+    const btn = document.getElementById("universal-run-btn");
+    if (btn) btn.disabled = true;
+    switchTab("output");
+    appendOutput("command", "agent universal_analyze",
+        "Running 3-Stage Pipeline...\n  Stage 1: Data Organizer\n  Stage 2: Calculator\n  Stage 3: Reporter");
+    setStatus("loading", "Stage 1: Organizing data...");
+
+    const ac = new AbortController();
+    const tid = setTimeout(() => ac.abort(), 300000);
+
+    try {
+        let resp;
+        if (universalFile) {
+            const fd = new FormData();
+            fd.append("file", universalFile);
+            fd.append("proposal_context", ctx);
+            if (tt) fd.append("test_type", tt);
+            resp = await fetch("/api/agent/universal_analyze_file", { method: "POST", body: fd, signal: ac.signal });
         } else {
-            updateLastOutput("ai analyze", `Error: ${err.message}\n\nMake sure Ollama is installed and running (ollama serve).\nThe AI features require a local Ollama instance with llama3.2.`, "error");
+            resp = await fetch("/api/agent/universal_analyze", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ raw_text: raw, proposal_context: ctx, test_type: tt || null }),
+                signal: ac.signal,
+            });
         }
-        setStatus("error", "AI analysis failed");
+        clearTimeout(tid);
+        const d = await resp.json();
+
+        if (d.error || d.result?.error) {
+            const fs = d.result?.failed_stage || 1;
+            for (let i = 1; i < fs; i++) setStepper(i, "complete", "Done");
+            setStepper(fs, "error", "Failed");
+            updateLastOutput(d.error || d.result.error, "error");
+            setStatus("error", "Analysis failed");
+            delayCleanup(btn, stepper);
+            return;
+        }
+
+        setStepper(1, "complete", "Done");
+        setStepper(2, "complete", "Done");
+        setStepper(3, "complete", "Done");
+
+        const res = d.result;
+        let out = "=".repeat(60) + "\n  UNIVERSAL STATISTICAL ANALYSIS\n" + "=".repeat(60) + "\n\n";
+
+        // Stage 1
+        if (res.layer1_extraction) {
+            out += ">>> STAGE 1: DATA ORGANIZER\n" + "-".repeat(40) + "\n";
+            out += `  Groups: ${res.layer1_extraction.groups_found?.join(", ") || "N/A"}\n`;
+            if (res.layer1_extraction.samples_per_group) {
+                Object.entries(res.layer1_extraction.samples_per_group).forEach(([g, n]) =>
+                    out += `    ${g}: n=${n}\n`);
+            }
+            out += "\n";
+        }
+
+        // Stage 2
+        if (res.layer2_statistics) {
+            const st = res.layer2_statistics;
+            out += ">>> STAGE 2: PYTHON CALCULATOR\n" + "-".repeat(40) + "\n\n";
+
+            if (st.descriptive) {
+                out += "  DESCRIPTIVE STATISTICS\n  " + "-".repeat(56) + "\n";
+                out += "  " + "Group".padEnd(18) + "N".padStart(6) + "Mean".padStart(10) + "SD".padStart(10) + "   95% CI\n";
+                out += "  " + "-".repeat(56) + "\n";
+                Object.entries(st.descriptive).forEach(([g, d]) => {
+                    let ci = "N/A";
+                    if (Array.isArray(d.ci_95) && d.ci_95.length === 2) ci = `[${d.ci_95[0].toFixed(2)}, ${d.ci_95[1].toFixed(2)}]`;
+                    else if (d.ci_95_lower != null) ci = `[${d.ci_95_lower.toFixed(2)}, ${d.ci_95_upper.toFixed(2)}]`;
+                    out += `  ${g.padEnd(18)} ${String(d.n).padStart(6)} ${d.mean.toFixed(3).padStart(10)} ${d.std.toFixed(3).padStart(10)}   ${ci}\n`;
+                });
+                out += "\n";
+            }
+
+            if (st.anova) {
+                out += "  ONE-WAY ANOVA\n  " + "-".repeat(35) + "\n";
+                out += `  F = ${st.anova.F_statistic}\n  p = ${st.anova.p_value}`;
+                out += st.anova.significant ? " ***\n" : "\n";
+                if (st.anova.conclusion) out += `  ${st.anova.conclusion}\n`;
+                out += "\n";
+            }
+
+            if (st.posthoc?.comparisons) {
+                out += "  TUKEY HSD\n  " + "-".repeat(55) + "\n";
+                out += "  " + "Comparison".padEnd(28) + "Diff".padStart(10) + "p-adj".padStart(12) + " Sig\n";
+                out += "  " + "-".repeat(55) + "\n";
+                st.posthoc.comparisons.forEach(c => {
+                    const sig = c.significant ? " ***" : "";
+                    out += `  ${(c.group1 + " vs " + c.group2).padEnd(28)} ${c.mean_diff.toFixed(3).padStart(10)} ${c.p_adj.toFixed(6).padStart(12)}${sig}\n`;
+                });
+                out += "\n";
+            }
+
+            if (st.power_analysis && !st.power_analysis.error) {
+                const pa = st.power_analysis;
+                out += "  POWER ANALYSIS\n  " + "-".repeat(40) + "\n";
+                out += `  Effect size (f): ${pa.effect_size_f}\n`;
+                out += `  Observed power: ${pa.observed_power}\n`;
+                out += `  Current N/group: ${pa.current_n_per_group}\n`;
+                if (!pa.adequate_power) out += `  Recommended N: ${pa.recommended_n_per_group}\n`;
+                out += "\n";
+            }
+        }
+
+        // Stage 3
+        if (res.layer3_interpretation) {
+            const interp = res.layer3_interpretation;
+            out += ">>> STAGE 3: REPORTER\n" + "-".repeat(40) + "\n\n";
+            if (interp.report) {
+                out += "  ACADEMIC RESULTS:\n  " + "=".repeat(45) + "\n\n";
+                wordWrap(interp.report, 70).forEach(line => out += `  ${line}\n`);
+            }
+        }
+
+        out += "\n" + "=".repeat(60) + "\n  PIPELINE COMPLETE\n" + "=".repeat(60);
+        updateLastOutput(out);
+        setStatus("ok", "Pipeline complete");
+        toast("Universal analysis complete", "success");
+        universalFile = null;
+        delayCleanup(btn, stepper, true);
+
+    } catch (err) {
+        clearTimeout(tid);
+        setStepper(1, "error", "Failed");
+        updateLastOutput(err.name === "AbortError" ? "Timed out" : `Error: ${err.message}`, "error");
+        setStatus("error", "Analysis failed");
+        delayCleanup(btn, stepper);
     }
 }
 
-// ============================================================
-// RIGHT PANEL
-// ============================================================
-function initRightPanel() {
-    document.querySelectorAll(".right-tab").forEach(tab => {
-        tab.addEventListener("click", () => {
-            document.querySelectorAll(".right-tab").forEach(t => t.classList.remove("active"));
-            document.querySelectorAll(".right-content").forEach(c => c.classList.remove("active"));
-            tab.classList.add("active");
-            document.getElementById(tab.dataset.panel).classList.add("active");
+function delayCleanup(btn, stepper, closeM) {
+    setTimeout(() => {
+        if (stepper) stepper.style.display = "none";
+        if (btn) btn.disabled = false;
+        if (closeM) closeModal("universal-modal");
+    }, 1500);
+}
+
+/* ==================================================================
+   18. AI ANALYSIS
+   ================================================================== */
+async function runAIAnalysis() {
+    const proposal = document.getElementById("ai-proposal-text")?.value || "";
+    const question = document.getElementById("ai-question")?.value || "";
+    const research = isChecked("ai-lit-search");
+    closeModal("ai-modal");
+    switchTab("output");
+    appendOutput("command", "ai analyze", "Running AI analysis...");
+    setStatus("loading", "AI analyzing...");
+    try {
+        const r = await fetch("/api/agent/analyze", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ proposal, question, do_research: research }),
         });
-    });
-}
-
-function updateProperties(data) {
-    const panel = document.getElementById("properties-content");
-    if (!panel || !data) return;
-
-    let html = '<div class="prop-section">';
-    html += '<div class="prop-section-title">Dataset Info</div>';
-    html += `<div class="prop-row"><span class="prop-label">File</span><span class="prop-value">${data.filename || "N/A"}</span></div>`;
-    html += `<div class="prop-row"><span class="prop-label">Observations</span><span class="prop-value">${data.shape?.[0] || 0}</span></div>`;
-    html += `<div class="prop-row"><span class="prop-label">Variables</span><span class="prop-value">${data.shape?.[1] || 0}</span></div>`;
-    html += '</div>';
-
-    if (data.data_info) {
-        const di = data.data_info;
-        html += '<div class="prop-section">';
-        html += '<div class="prop-section-title">Variable Types</div>';
-        html += `<div class="prop-row"><span class="prop-label">Numeric</span><span class="prop-value">${di.numeric_columns?.length || 0}</span></div>`;
-        html += `<div class="prop-row"><span class="prop-label">Categorical</span><span class="prop-value">${di.categorical_columns?.length || 0}</span></div>`;
-        html += `<div class="prop-row"><span class="prop-label">Group vars</span><span class="prop-value">${di.group_candidates?.length || 0}</span></div>`;
-        html += '</div>';
-
-        if (di.group_candidates?.length > 0) {
-            html += '<div class="prop-section">';
-            html += '<div class="prop-section-title">Group Variables</div>';
-            di.group_candidates.forEach(gc => {
-                html += `<div class="prop-row"><span class="prop-label">${gc.column}</span><span class="prop-value">${gc.n_groups} groups</span></div>`;
-            });
-            html += '</div>';
-        }
-
-        // Missing data
-        const missing = di.missing_summary || {};
-        const totalMissing = Object.values(missing).reduce((a, b) => a + b, 0);
-        if (totalMissing > 0) {
-            html += '<div class="prop-section">';
-            html += '<div class="prop-section-title">Missing Data</div>';
-            Object.entries(missing).forEach(([col, n]) => {
-                if (n > 0) {
-                    html += `<div class="prop-row"><span class="prop-label">${col}</span><span class="prop-value" style="color:var(--accent-yellow)">${n}</span></div>`;
-                }
-            });
-            html += '</div>';
-        }
+        const d = await r.json();
+        if (d.error) { updateLastOutput(d.error, "error"); setStatus("error", "Failed"); return; }
+        const res = d.result;
+        let out = "";
+        if (res?.stdout) out = res.stdout;
+        else if (res?.output) out = res.output;
+        else out = formatObj(res);
+        updateLastOutput(out);
+        setStatus("ok", "AI analysis complete");
+    } catch (err) {
+        updateLastOutput(`Error: ${err.message}`, "error");
+        setStatus("error", "AI failed");
     }
-
-    panel.innerHTML = html;
 }
 
-// ============================================================
-// STATUS BAR
-// ============================================================
+/* ==================================================================
+   19. SAMPLE SIZE FROM TEXT
+   ================================================================== */
+async function runSampleSizeText() {
+    const text = document.getElementById("ss-description")?.value || "";
+    const alpha = parseFloat(document.getElementById("ss-alpha")?.value) || 0.05;
+    const power = parseFloat(document.getElementById("ss-power")?.value) || 0.80;
+    if (!text.trim()) { toast("Paste text with Mean/SD values", "error"); return; }
+    closeModal("sample-size-modal");
+    switchTab("output");
+    appendOutput("command", "sample size from text", "Parsing Mean/SD values...");
+    try {
+        const r = await fetch("/api/agent/sample_size_text", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ text, alpha, power }),
+        });
+        const d = await r.json();
+        if (d.error || d.result?.error) { updateLastOutput(d.error || d.result.error, "error"); return; }
+        const res = d.result;
+        let out = "=".repeat(60) + "\n  SAMPLE SIZE (from text)\n" + "=".repeat(60) + "\n\n";
+        if (res.group1 && res.group2) {
+            out += `  Group 1 (${res.group1.name}): Mean=${res.group1.mean}, SD=${res.group1.sd}\n`;
+            out += `  Group 2 (${res.group2.name}): Mean=${res.group2.mean}, SD=${res.group2.sd}\n\n`;
+        }
+        if (res.effect_size) {
+            out += `  Cohen's d = ${res.effect_size.cohens_d} (${res.effect_size.interpretation})\n\n`;
+        }
+        if (res.calculation) {
+            const c = res.calculation;
+            out += `  Required N per group: ${c.n_per_group}\n`;
+            out += `  Total N: ${c.total_n}\n`;
+            out += `  Alpha=${c.alpha}, Power=${c.power}\n`;
+        }
+        out += "\n" + "=".repeat(60);
+        updateLastOutput(out);
+        toast("Sample size calculated", "success");
+    } catch (err) {
+        updateLastOutput(`Error: ${err.message}`, "error");
+    }
+}
+
+/* ==================================================================
+   20. MESSY DATA
+   ================================================================== */
+async function runMessyData() {
+    const desc = document.getElementById("messy-description")?.value || "";
+    closeModal("messy-modal");
+    switchTab("output");
+    appendOutput("command", "agent messy_data", "Analyzing loaded data...");
+    setStatus("loading", "Agent analyzing...");
+    try {
+        const r = await fetch("/api/agent/messy_data", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ description: desc }),
+        });
+        const d = await r.json();
+        if (d.error || d.result?.error) {
+            updateLastOutput(d.error || d.result.error, "error");
+            setStatus("error", "Failed"); return;
+        }
+        const res = d.result;
+        let out = "=".repeat(60) + "\n  MESSY DATA ANALYSIS\n" + "=".repeat(60) + "\n\n";
+        if (res.statistics) {
+            const st = res.statistics;
+            if (st.anova_results) {
+                out += "  ANOVA Results:\n";
+                Object.entries(st.anova_results).forEach(([tp, r]) => {
+                    out += `    [${tp}] F=${r.F_statistic}, p=${r.p_value}${r.significant ? " ***" : ""}\n`;
+                });
+                out += "\n";
+            }
+            if (st.descriptive_stats) {
+                out += "  Descriptive Stats:\n";
+                Object.entries(st.descriptive_stats).forEach(([tp, groups]) => {
+                    out += `    [${tp}]\n`;
+                    Object.entries(groups).forEach(([g, d]) => {
+                        out += `      ${g}: Mean=${d.mean}, SD=${d.std}, N=${d.n}\n`;
+                    });
+                });
+                out += "\n";
+            }
+        }
+        if (res.interpretation) out += `  Interpretation:\n  ${res.interpretation}\n`;
+        out += "\n" + "=".repeat(60);
+        updateLastOutput(out);
+        setStatus("ok", "Analysis complete");
+        toast("Messy data analysis complete", "success");
+    } catch (err) {
+        updateLastOutput(`Error: ${err.message}`, "error");
+        setStatus("error", "Failed");
+    }
+}
+
+/* ==================================================================
+   21. LITERATURE REVIEW
+   ================================================================== */
+async function runLitReview() {
+    const query = document.getElementById("lit-query")?.value || "";
+    const max = parseInt(document.getElementById("lit-max")?.value) || 5;
+    if (!query.trim()) { toast("Enter a topic", "error"); return; }
+    closeModal("lit-modal");
+    switchTab("output");
+    appendOutput("command", `literature "${query.substring(0, 40)}"`, "Searching...");
+    setStatus("loading", "Searching literature...");
+    try {
+        const r = await fetch("/api/agent/literature", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ query, max_results: max }),
+        });
+        const d = await r.json();
+        if (d.error || d.result?.error) {
+            updateLastOutput(d.error || d.result.error, "error");
+            setStatus("error", "Failed"); return;
+        }
+        const res = d.result;
+        let out = "=".repeat(60) + "\n  LITERATURE REVIEW\n" + "=".repeat(60) + "\n\n";
+        out += `  Topic: ${query}\n  Sources: ${res.sources_searched || 0}\n\n`;
+        if (res.review) out += res.review + "\n\n";
+        if (res.references?.length) {
+            out += "  References:\n";
+            res.references.forEach(r => out += `    [${r.number}] ${r.title}\n        ${r.url}\n`);
+        }
+        out += "\n" + "=".repeat(60);
+        updateLastOutput(out);
+        setStatus("ok", "Review complete");
+        toast("Literature review generated", "success");
+    } catch (err) {
+        updateLastOutput(`Error: ${err.message}`, "error");
+        setStatus("error", "Failed");
+    }
+}
+
+/* ==================================================================
+   22. MODEL MANAGEMENT / OLLAMA STATUS
+   ================================================================== */
+async function loadModels() {
+    try {
+        const r = await fetch("/api/agent/models");
+        const d = await r.json();
+        const sel = document.getElementById("model-select");
+        const dot = document.getElementById("ollama-status");
+        if (sel && d.models) {
+            sel.innerHTML = "";
+            d.models.forEach(m => {
+                const opt = document.createElement("option");
+                opt.value = m; opt.textContent = m;
+                if (m === d.current) opt.selected = true;
+                sel.appendChild(opt);
+            });
+            sel.addEventListener("change", () => changeModel(sel.value));
+        }
+        if (dot) {
+            dot.classList.remove("connecting");
+            if (d.ollama_running) {
+                dot.classList.add("connected");
+                dot.title = "Ollama running";
+            } else {
+                dot.classList.add("warning");
+                dot.title = "Ollama not available";
+            }
+        }
+        const banner = document.getElementById("fallback-banner");
+        if (banner) banner.style.display = d.fallback_mode ? "" : "none";
+    } catch {
+        const dot = document.getElementById("ollama-status");
+        if (dot) { dot.classList.remove("connecting"); dot.classList.add("warning"); dot.title = "Cannot reach server"; }
+    }
+}
+
+async function changeModel(name) {
+    try {
+        await fetch("/api/agent/models", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ model: name }),
+        });
+        toast(`Model set to ${name}`, "success");
+    } catch (err) {
+        toast(`Failed: ${err.message}`, "error");
+    }
+}
+
+/* ==================================================================
+   23. STATUS BAR
+   ================================================================== */
 function setStatus(type, text) {
     const dot = document.getElementById("status-dot");
     const msg = document.getElementById("status-message");
     if (dot) {
         dot.className = "status-dot";
         if (type === "error") dot.classList.add("error");
-        else if (type === "loading" || type === "warning") dot.classList.add("warning");
+        else if (type === "loading") dot.classList.add("warning");
+        else if (type === "ok") dot.classList.add("connected");
     }
     if (msg) msg.textContent = text;
 }
 
-// ============================================================
-// TOAST NOTIFICATIONS
-// ============================================================
-function showToast(message, type = "info") {
-    const existing = document.querySelectorAll(".toast");
-    existing.forEach(t => t.remove());
-
-    const toast = document.createElement("div");
-    toast.className = `toast ${type}`;
-    toast.textContent = message;
-    document.body.appendChild(toast);
-
-    setTimeout(() => toast.remove(), 4000);
+/* ==================================================================
+   24. TOAST NOTIFICATIONS
+   ================================================================== */
+function toast(message, type) {
+    type = type || "info";
+    const container = document.getElementById("toast-container");
+    if (!container) return;
+    const t = document.createElement("div");
+    t.className = `toast ${type}`;
+    t.textContent = message;
+    container.appendChild(t);
+    requestAnimationFrame(() => t.classList.add("show"));
+    setTimeout(() => { t.classList.remove("show"); setTimeout(() => t.remove(), 300); }, 3500);
 }
 
-// ============================================================
-// KEYBOARD SHORTCUTS
-// ============================================================
-function initKeyboardShortcuts() {
-    document.addEventListener("keydown", (e) => {
-        // Ctrl+O: Open file
-        if (e.ctrlKey && e.key === "o") {
+/* ==================================================================
+   25. KEYBOARD SHORTCUTS
+   ================================================================== */
+function initKeyboard() {
+    document.addEventListener("keydown", e => {
+        if (e.ctrlKey && e.key === "o") { e.preventDefault(); document.getElementById("file-input")?.click(); }
+        if (e.ctrlKey && e.key === "l") { e.preventDefault(); document.getElementById("command-input")?.focus(); }
+        if (e.ctrlKey && e.key >= "1" && e.key <= "3") {
             e.preventDefault();
-            openFile();
+            const tabs = ["output", "data", "graph"];
+            switchTab(tabs[parseInt(e.key) - 1]);
         }
-        // Ctrl+1-5: Switch tabs
-        if (e.ctrlKey && e.key >= "1" && e.key <= "5") {
-            e.preventDefault();
-            const tabs = ["welcome", "data", "output", "analysis"];
-            const idx = parseInt(e.key) - 1;
-            if (tabs[idx]) switchTab(tabs[idx]);
-        }
-        // F5: Run AI analysis
-        if (e.key === "F5") {
-            e.preventDefault();
-            runAIAnalysis();
-        }
-        // Ctrl+L: Focus command input
-        if (e.ctrlKey && e.key === "l") {
-            e.preventDefault();
-            document.getElementById("command-input")?.focus();
+        if (e.key === "Escape") {
+            document.querySelectorAll(".modal-overlay.active").forEach(m => m.classList.remove("active"));
         }
     });
 }
 
-// ============================================================
-// UTILITIES
-// ============================================================
-function escapeHtml(str) {
+/* ==================================================================
+   26. UTILITIES
+   ================================================================== */
+function esc(str) {
     if (!str) return "";
-    const div = document.createElement("div");
-    div.textContent = str;
-    return div.innerHTML;
+    const d = document.createElement("div");
+    d.textContent = str;
+    return d.innerHTML;
 }
 
-// Close modals on outside click
-document.addEventListener("click", (e) => {
-    if (e.target.classList.contains("modal-overlay")) {
-        e.target.classList.remove("active");
-    }
-});
-
-// ============================================================
-// SMART STATISTICAL ROUTER
-// ============================================================
-async function runSmartAnalyze() {
-    const vars = getMultiSelectValues("smart-vars");
-    const subjectVar = document.getElementById("smart-subject")?.value || null;
-    const alpha = parseFloat(document.getElementById("smart-alpha")?.value) || 0.05;
-
-    if (vars.length === 0) {
-        showToast("Select at least one variable", "error");
-        return;
-    }
-
-    closeModal("modal-smart-analyze");
-    switchTab("output");
-    appendOutput("command", `smart analyze ${vars.join(" ")}`, ">>> Analyzing data structure and selecting test...");
-
-    try {
-        const resp = await fetch("/api/stats/smart_analyze", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-                columns: vars,
-                subject_var: subjectVar,
-                alpha: alpha
-            }),
-        });
-        const data = await resp.json();
-
-        if (data.error) {
-            updateLastOutput(`smart analyze`, data.error, "error");
-            return;
-        }
-
-        const result = data.result;
-        let output = "=" .repeat(60) + "\n";
-        output += "  SMART STATISTICAL ROUTER RESULTS\n";
-        output += "=" .repeat(60) + "\n\n";
-
-        // Selected test
-        output += `>>> Selected Test: ${result.selected_test || "Unknown"}\n\n`;
-
-        // Reasoning
-        if (result.reasoning) {
-            output += "--- Decision Reasoning ---\n";
-            output += result.reasoning + "\n\n";
-        }
-
-        // Variable types
-        if (result.variable_types) {
-            output += "--- Variable Classification ---\n";
-            Object.entries(result.variable_types).forEach(([v, t]) => {
-                output += `  ${v}: ${t}\n`;
-            });
-            output += "\n";
-        }
-
-        // Test result
-        if (result.result) {
-            output += "--- Test Results ---\n";
-            if (typeof result.result === "string") {
-                output += result.result;
-            } else if (result.result.output) {
-                output += result.result.output;
-            } else {
-                output += JSON.stringify(result.result, null, 2);
-            }
-            output += "\n\n";
-        }
-
-        // Post-hoc (if any)
-        if (result.posthoc) {
-            output += "--- Post-Hoc Analysis (auto-triggered) ---\n";
-            output += result.posthoc_note + "\n";
-            if (result.posthoc.comparisons) {
-                result.posthoc.comparisons.forEach(c => {
-                    output += `  ${c.Group1} vs ${c.Group2}: `;
-                    output += `diff=${c.Mean_Diff}, p=${c.p_adj || c.p_bonferroni}`;
-                    output += c.Significant === true || c.Reject_H0 === "True" ? " *\n" : "\n";
-                });
-            }
-            output += "\n";
-        }
-
-        // Normality (if any)
-        if (result.normality) {
-            output += "--- Normality Test ---\n";
-            output += `  Normal: ${result.normality.is_normal ? "Yes" : "No"}\n`;
-            output += `  Shapiro-Wilk p: ${result.normality.p_value}\n\n`;
-        }
-
-        output += "=" .repeat(60) + "\n";
-        output += "  END OF SMART ANALYSIS\n";
-        output += "=" .repeat(60);
-
-        updateLastOutput(`smart analyze ${vars.join(" ")}`, output);
-        showToast(`Analysis complete: ${result.selected_test}`, "success");
-
-    } catch (err) {
-        updateLastOutput(`smart analyze`, `Error: ${err.message}`, "error");
-    }
-}
-
-// ============================================================
-// SAMPLE SIZE FROM TEXT
-// ============================================================
-async function runSampleSizeFromText() {
-    const text = document.getElementById("ss-text")?.value || "";
-    const alpha = parseFloat(document.getElementById("ss-text-alpha")?.value) || 0.05;
-    const power = parseFloat(document.getElementById("ss-text-power")?.value) || 0.80;
-
-    if (!text.trim()) {
-        showToast("Paste text with Mean/SD values", "error");
-        return;
-    }
-
-    closeModal("modal-samplesize-text");
-    switchTab("output");
-    appendOutput("command", "sample size from text", ">>> Parsing Mean/SD values from text...");
-
-    try {
-        const resp = await fetch("/api/ai/sample_size_from_text", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ text, alpha, power }),
-        });
-        const data = await resp.json();
-
-        if (data.error || data.result?.error) {
-            updateLastOutput("sample size from text", data.error || data.result.error, "error");
-            return;
-        }
-
-        const result = data.result;
-        let output = "=" .repeat(60) + "\n";
-        output += "  SAMPLE SIZE CALCULATION (from text)\n";
-        output += "=" .repeat(60) + "\n\n";
-
-        // Extracted values
-        if (result.group1 && result.group2) {
-            output += "--- Extracted Values ---\n";
-            output += `  Group 1 (${result.group1.name}):\n`;
-            output += `    Mean = ${result.group1.mean}, SD = ${result.group1.sd}\n`;
-            output += `    Source: "${result.group1.source}"\n\n`;
-            output += `  Group 2 (${result.group2.name}):\n`;
-            output += `    Mean = ${result.group2.mean}, SD = ${result.group2.sd}\n`;
-            output += `    Source: "${result.group2.source}"\n\n`;
-        }
-
-        // Effect size
-        if (result.effect_size) {
-            output += "--- Effect Size ---\n";
-            output += `  Cohen's d = ${result.effect_size.cohens_d}\n`;
-            output += `  Interpretation: ${result.effect_size.interpretation}\n\n`;
-        }
-
-        // Calculation
-        if (result.calculation) {
-            const calc = result.calculation;
-            output += "--- Sample Size Calculation ---\n";
-            output += `  Mean difference (delta) = ${calc.mean_difference}\n`;
-            output += `  Pooled SD = ${calc.pooled_sd}\n`;
-            output += `  Alpha = ${calc.alpha}, Power = ${calc.power}\n`;
-            output += `  Z_alpha/2 = ${calc.z_alpha}, Z_beta = ${calc.z_beta}\n\n`;
-            output += `  >>> Required N per group = ${calc.n_per_group}\n`;
-            output += `  >>> Total N = ${calc.total_n}\n\n`;
-            output += `  Formula: ${calc.formula}\n`;
-        }
-
-        // All extracted values
-        if (result.all_extracted && result.all_extracted.length > 2) {
-            output += "\n--- All Extracted Values ---\n";
-            result.all_extracted.forEach((v, i) => {
-                output += `  [${i+1}] ${v.group}: Mean=${v.mean}, SD=${v.sd}\n`;
-            });
-        }
-
-        output += "\n" + "=" .repeat(60);
-
-        updateLastOutput("sample size from text", output);
-        showToast("Sample size calculated", "success");
-
-    } catch (err) {
-        updateLastOutput("sample size from text", `Error: ${err.message}`, "error");
-    }
-}
-
-// ============================================================
-// PROPOSAL UPLOAD (RAG CONTEXT)
-// ============================================================
-async function uploadProposal() {
-    const text = document.getElementById("proposal-text")?.value || "";
-
-    if (!text.trim()) {
-        showToast("Paste your research proposal text", "error");
-        return;
-    }
-
-    closeModal("modal-proposal-upload");
-    showToast("Storing proposal context...");
-
-    try {
-        const resp = await fetch("/api/ai/proposal", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ text }),
-        });
-        const data = await resp.json();
-
-        if (data.error) {
-            showToast(data.error, "error");
-            return;
-        }
-
-        const result = data.result;
-        let msg = `Proposal stored (${result.text_length} chars)`;
-        if (result.variables_detected?.length > 0) {
-            msg += `, ${result.variables_detected.length} variables detected`;
-        }
-        if (result.citations_found > 0) {
-            msg += `, ${result.citations_found} citations found`;
-        }
-
-        showToast(msg, "success");
-
-        // Also show in output
-        switchTab("output");
-        let output = ">>> Research Proposal Context Stored\n";
-        output += `  Text length: ${result.text_length} characters\n`;
-        output += `  Variables detected: ${result.variables_detected?.join(", ") || "None"}\n`;
-        output += `  Citations found: ${result.citations_found}\n`;
-        output += `  Methodology extracted: ${result.methodology_extracted ? "Yes" : "No"}\n`;
-        output += "\n>>> The AI will use this context for future analyses.";
-        appendOutput("command", "ai proposal upload", output);
-
-    } catch (err) {
-        showToast(`Error: ${err.message}`, "error");
-    }
-}
-
-async function checkProposalReferences() {
-    const text = document.getElementById("proposal-text")?.value || "";
-
-    if (!text.trim()) {
-        showToast("Paste your proposal text first", "error");
-        return;
-    }
-
-    showToast("Analyzing references...");
-
-    try {
-        const resp = await fetch("/api/ai/check_references", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ text }),
-        });
-        const data = await resp.json();
-
-        if (data.error) {
-            showToast(data.error, "error");
-            return;
-        }
-
-        const result = data.result;
-        closeModal("modal-proposal-upload");
-        switchTab("output");
-
-        let output = "=" .repeat(60) + "\n";
-        output += "  REFERENCE ANALYSIS\n";
-        output += "=" .repeat(60) + "\n\n";
-        output += `Total citations found: ${result.total_citations}\n\n`;
-
-        if (result.citations_list?.length > 0) {
-            output += "--- Citations Found ---\n";
-            result.citations_list.forEach((c, i) => {
-                output += `  [${i+1}] ${c}\n`;
-            });
-            output += "\n";
-        }
-
-        if (result.quality_indicators) {
-            const qi = result.quality_indicators;
-            output += "--- Quality Indicators ---\n";
-            output += `  Average publication year: ${qi.average_year}\n`;
-            output += `  Oldest reference: ${qi.oldest_reference}\n`;
-            output += `  Newest reference: ${qi.newest_reference}\n`;
-            output += `  Years span: ${qi.years_span}\n\n`;
-        }
-
-        if (result.suggestions?.length > 0) {
-            output += "--- Suggestions ---\n";
-            result.suggestions.forEach(s => {
-                output += `  >>> ${s}\n`;
-            });
-        }
-
-        output += "\n" + "=" .repeat(60);
-        appendOutput("command", "check references", output);
-        showToast("Reference analysis complete", "success");
-
-    } catch (err) {
-        showToast(`Error: ${err.message}`, "error");
-    }
-}
-
-// ============================================================
-// AGENT CORE: MODEL MANAGEMENT
-// ============================================================
-async function loadAvailableModels() {
-    try {
-        const resp = await fetch("/api/agent/models");
-        const data = await resp.json();
-
-        const select = document.getElementById("model-select");
-        const status = document.getElementById("ollama-status");
-
-        if (select && data.models) {
-            select.innerHTML = "";
-            data.models.forEach(model => {
-                const opt = document.createElement("option");
-                opt.value = model;
-                opt.textContent = model;
-                if (model === data.current) opt.selected = true;
-                select.appendChild(opt);
-            });
-        }
-
-        if (status) {
-            if (data.ollama_running) {
-                status.style.background = "var(--accent-green)";
-                status.title = "Ollama running";
-            } else {
-                status.style.background = "var(--accent-yellow)";
-                status.title = "Ollama not available - Python fallback active";
-            }
-        }
-
-        // Show fallback mode indicator
-        const fallbackBanner = document.getElementById("fallback-mode-banner");
-        if (fallbackBanner) {
-            fallbackBanner.style.display = data.fallback_mode ? "block" : "none";
-        }
-    } catch (err) {
-        const status = document.getElementById("ollama-status");
-        if (status) {
-            status.style.background = "var(--accent-yellow)";
-            status.title = "Ollama not available - Python fallback active";
-        }
-    }
-}
-
-async function changeModel(modelName) {
-    try {
-        await fetch("/api/agent/models", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ model: modelName }),
-        });
-        showToast(`Model changed to ${modelName}`, "success");
-    } catch (err) {
-        showToast(`Failed to change model: ${err.message}`, "error");
-    }
-}
-
-// ============================================================
-// AGENT: MESSY DATA ANALYSIS
-// ============================================================
-async function runMessyDataAnalysis() {
-    const rawText = document.getElementById("messy-data-text")?.value || "";
-    const context = document.getElementById("messy-data-context")?.value || "";
-
-    if (!rawText.trim()) {
-        showToast("Paste your messy data first", "error");
-        return;
-    }
-
-    closeModal("modal-messy-data");
-    switchTab("output");
-    appendOutput("command", "agent messy_data", ">>> Analyzing messy data (AI cleaning + Python ANOVA)...");
-    setStatus("loading", "Agent analyzing data...");
-
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 180000); // 3 minutes
-
-    try {
-        const resp = await fetch("/api/agent/messy_data", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ raw_text: rawText, context }),
-            signal: controller.signal,
-        });
-        clearTimeout(timeoutId);
-        const data = await resp.json();
-
-        if (data.error || data.result?.error) {
-            updateLastOutput("agent messy_data", data.error || data.result.error, "error");
-            setStatus("error", "Analysis failed");
-            return;
-        }
-
-        const result = data.result;
-        let output = "=" .repeat(60) + "\n";
-        output += "  MESSY DATA ANALYSIS RESULTS\n";
-        output += "=" .repeat(60) + "\n\n";
-
-        // Structured Data
-        if (result.structured_data) {
-            output += "--- Extracted Structure ---\n";
-            output += `  Groups: ${result.structured_data.groups?.join(", ") || "N/A"}\n`;
-            output += `  Time Points: ${result.structured_data.timepoints?.join(", ") || "N/A"}\n\n`;
-        }
-
-        // Statistics
-        if (result.statistics) {
-            output += "--- ANOVA Results (Python scipy) ---\n";
-            const stats = result.statistics;
-
-            if (stats.anova_results) {
-                Object.entries(stats.anova_results).forEach(([tp, res]) => {
-                    output += `\n  [${tp}]\n`;
-                    output += `    F-statistic: ${res.F_statistic}\n`;
-                    output += `    p-value: ${res.p_value}`;
-                    output += res.significant ? " ***\n" : "\n";
-                });
-            }
-
-            if (stats.descriptive_stats) {
-                output += "\n--- Descriptive Statistics ---\n";
-                Object.entries(stats.descriptive_stats).forEach(([tp, groups]) => {
-                    output += `\n  [${tp}]\n`;
-                    Object.entries(groups).forEach(([group, ds]) => {
-                        output += `    ${group}: Mean=${ds.mean}, SD=${ds.std}, N=${ds.n}\n`;
-                    });
-                });
-            }
-
-            if (stats.posthoc_results && Object.keys(stats.posthoc_results).length > 0) {
-                output += "\n--- Post-Hoc Tukey HSD ---\n";
-                Object.entries(stats.posthoc_results).forEach(([tp, comparisons]) => {
-                    output += `\n  [${tp}]\n`;
-                    if (Array.isArray(comparisons)) {
-                        comparisons.forEach(c => {
-                            output += `    ${c.group1} vs ${c.group2}: diff=${c.mean_diff}, p=${c.p_adj}`;
-                            output += c.significant ? " *\n" : "\n";
-                        });
-                    }
-                });
-            }
-        }
-
-        // Interpretation
-        if (result.interpretation) {
-            output += "\n--- AI Interpretation ---\n";
-            output += result.interpretation + "\n";
-        }
-
-        output += "\n" + "=" .repeat(60);
-        updateLastOutput("agent messy_data", output);
-        setStatus("ok", "Analysis complete");
-        showToast("Messy data analysis complete", "success");
-
-    } catch (err) {
-        clearTimeout(timeoutId);
-        if (err.name === "AbortError") {
-            updateLastOutput("agent messy_data", "Error: Analysis timed out. Make sure Ollama is running.", "error");
-        } else {
-            updateLastOutput("agent messy_data", `Error: ${err.message}`, "error");
-        }
-        setStatus("error", "Analysis failed");
-    }
-}
-
-// ============================================================
-// AGENT: DUAL-MODE SAMPLE SIZE CALCULATOR
-// ============================================================
-let sampleSizeMode = "ai";
-
-function switchSampleSizeMode(mode) {
-    sampleSizeMode = mode;
-    const aiBtn = document.getElementById("ss-dual-ai-btn");
-    const manualBtn = document.getElementById("ss-dual-manual-btn");
-    const aiMode = document.getElementById("ss-dual-ai-mode");
-    const manualMode = document.getElementById("ss-dual-manual-mode");
-
-    if (mode === "ai") {
-        aiBtn.className = "btn btn-primary";
-        manualBtn.className = "btn btn-secondary";
-        aiMode.style.display = "";
-        manualMode.style.display = "none";
-    } else {
-        aiBtn.className = "btn btn-secondary";
-        manualBtn.className = "btn btn-primary";
-        aiMode.style.display = "none";
-        manualMode.style.display = "";
-    }
-}
-
-async function runDualSampleSize() {
-    closeModal("modal-sample-size-dual");
-    switchTab("output");
-
-    if (sampleSizeMode === "ai") {
-        const topic = document.getElementById("ss-dual-topic")?.value || "";
-        if (!topic.trim()) {
-            showToast("Enter a research topic", "error");
-            return;
-        }
-
-        appendOutput("command", `agent sample_size_auto "${topic.substring(0, 40)}..."`, ">>> Searching for similar studies and extracting effect size...");
-        setStatus("loading", "Agent searching literature...");
-
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 180000);
-
-        try {
-            const resp = await fetch("/api/agent/sample_size_auto", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ topic }),
-                signal: controller.signal,
-            });
-            clearTimeout(timeoutId);
-            const data = await resp.json();
-
-            if (data.error || data.result?.error) {
-                updateLastOutput("agent sample_size_auto", data.error || data.result.error, "error");
-                setStatus("error", "Search failed");
-                return;
-            }
-
-            const result = data.result;
-            let output = "=" .repeat(60) + "\n";
-            output += "  AI-POWERED SAMPLE SIZE CALCULATION\n";
-            output += "=" .repeat(60) + "\n\n";
-            output += `Topic: ${topic}\n\n`;
-
-            // Search results
-            if (result.search_results?.length > 0) {
-                output += "--- Literature Search Results ---\n";
-                result.search_results.slice(0, 5).forEach((r, i) => {
-                    if (!r.error) {
-                        output += `  [${i+1}] ${r.title || "N/A"}\n`;
-                        output += `      ${r.body?.substring(0, 100) || ""}...\n`;
-                    }
-                });
-                output += "\n";
-            }
-
-            // Extracted data
-            if (result.extracted_data?.studies_found?.length > 0) {
-                output += "--- Extracted Mean/SD Data ---\n";
-                result.extracted_data.studies_found.forEach((s, i) => {
-                    output += `  Study ${i+1}: ${s.title || "N/A"}\n`;
-                    if (s.control_mean !== undefined) {
-                        output += `    Control: Mean=${s.control_mean}, SD=${s.control_sd}\n`;
-                    }
-                    if (s.treatment_mean !== undefined) {
-                        output += `    Treatment: Mean=${s.treatment_mean}, SD=${s.treatment_sd}\n`;
-                    }
-                });
-                output += "\n";
-            }
-
-            // Sample size calculation
-            if (result.sample_size) {
-                const ss = result.sample_size;
-                output += "--- Sample Size Calculation ---\n";
-                output += `  Effect Size (Cohen's d): ${ss.effect_size} (${ss.interpretation})\n`;
-                output += `  Alpha: ${ss.alpha}, Power: ${ss.power}\n`;
-                output += `  Source: ${ss.source_study}\n\n`;
-                output += `  >>> REQUIRED N PER GROUP: ${ss.n_per_group}\n`;
-                output += `  >>> TOTAL N: ${ss.total_n}\n`;
-            }
-
-            output += "\n" + "=" .repeat(60);
-            updateLastOutput("agent sample_size_auto", output);
-            setStatus("ok", "Calculation complete");
-            showToast("Sample size calculated", "success");
-
-        } catch (err) {
-            clearTimeout(timeoutId);
-            if (err.name === "AbortError") {
-                updateLastOutput("agent sample_size_auto", "Error: Search timed out.", "error");
-            } else {
-                updateLastOutput("agent sample_size_auto", `Error: ${err.message}`, "error");
-            }
-            setStatus("error", "Calculation failed");
-        }
-
-    } else {
-        // Manual mode
-        const effectSize = parseFloat(document.getElementById("ss-dual-effect")?.value) || 0.5;
-        const alpha = parseFloat(document.getElementById("ss-dual-alpha")?.value) || 0.05;
-        const power = parseFloat(document.getElementById("ss-dual-power")?.value) || 0.80;
-        const testType = document.getElementById("ss-dual-test")?.value || "t-test";
-
-        appendOutput("command", "agent sample_size_manual", ">>> Calculating sample size...");
-
-        try {
-            const resp = await fetch("/api/agent/sample_size_manual", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ effect_size: effectSize, alpha, power, test_type: testType }),
-            });
-            const data = await resp.json();
-
-            if (data.error || data.result?.error) {
-                updateLastOutput("agent sample_size_manual", data.error || data.result.error, "error");
-                return;
-            }
-
-            const result = data.result;
-            let output = "=" .repeat(60) + "\n";
-            output += "  MANUAL SAMPLE SIZE CALCULATION\n";
-            output += "=" .repeat(60) + "\n\n";
-            output += "--- Parameters ---\n";
-            output += `  Test Type: ${result.test_type}\n`;
-            output += `  Effect Size: ${result.effect_size} (${result.interpretation})\n`;
-            output += `  Alpha: ${result.alpha}\n`;
-            output += `  Power: ${result.power}\n\n`;
-            output += `  >>> REQUIRED N PER GROUP: ${result.n_per_group}\n`;
-            output += `  >>> TOTAL N: ${result.total_n}\n`;
-            output += "\n" + "=" .repeat(60);
-
-            updateLastOutput("agent sample_size_manual", output);
-            showToast("Sample size calculated", "success");
-
-        } catch (err) {
-            updateLastOutput("agent sample_size_manual", `Error: ${err.message}`, "error");
-        }
-    }
-}
-
-// ============================================================
-// UNIVERSAL STATISTICAL ANALYSIS AGENT (3-STAGE PIPELINE)
-// ============================================================
-
-let universalFileData = null;
-
-// Progress stepper helper functions
-function showProgressStepper() {
-    const stepper = document.getElementById("universal-progress-stepper");
-    if (stepper) {
-        stepper.style.display = "block";
-        // Reset all stages to waiting
-        resetProgressStage(1);
-        resetProgressStage(2);
-        resetProgressStage(3);
-    }
-}
-
-function hideProgressStepper() {
-    const stepper = document.getElementById("universal-progress-stepper");
-    if (stepper) {
-        stepper.style.display = "none";
-    }
-}
-
-function resetProgressStage(stageNum) {
-    const stage = document.getElementById(`stage-${stageNum}`);
-    const icon = document.getElementById(`stage-${stageNum}-icon`);
-    const status = document.getElementById(`stage-${stageNum}-status`);
-    if (stage) {
-        stage.className = "progress-stage waiting";
-    }
-    if (icon) {
-        if (stageNum === 1) icon.textContent = "[~]";
-        else if (stageNum === 2) icon.textContent = "[%]";
-        else if (stageNum === 3) icon.textContent = "[#]";
-    }
-    if (status) {
-        status.textContent = "Waiting";
-    }
-}
-
-function setStageActive(stageNum, statusText) {
-    const stage = document.getElementById(`stage-${stageNum}`);
-    const icon = document.getElementById(`stage-${stageNum}-icon`);
-    const status = document.getElementById(`stage-${stageNum}-status`);
-    if (stage) {
-        stage.className = "progress-stage active";
-    }
-    if (icon) {
-        if (stageNum === 1) icon.textContent = "[*]";
-        else if (stageNum === 2) icon.textContent = "[*]";
-        else if (stageNum === 3) icon.textContent = "[*]";
-    }
-    if (status && statusText) {
-        status.textContent = statusText;
-    }
-}
-
-function setStageComplete(stageNum, statusText) {
-    const stage = document.getElementById(`stage-${stageNum}`);
-    const icon = document.getElementById(`stage-${stageNum}-icon`);
-    const status = document.getElementById(`stage-${stageNum}-status`);
-    if (stage) {
-        stage.className = "progress-stage complete";
-    }
-    if (icon) {
-        icon.textContent = "[OK]";
-    }
-    if (status && statusText) {
-        status.textContent = statusText;
-    }
-}
-
-function setStageError(stageNum, statusText) {
-    const stage = document.getElementById(`stage-${stageNum}`);
-    const icon = document.getElementById(`stage-${stageNum}-icon`);
-    const status = document.getElementById(`stage-${stageNum}-status`);
-    if (stage) {
-        stage.className = "progress-stage error";
-    }
-    if (icon) {
-        icon.textContent = "[X]";
-    }
-    if (status && statusText) {
-        status.textContent = statusText;
-    }
-}
-
-function handleDragOver(e) {
-    e.preventDefault();
-    e.stopPropagation();
-    e.currentTarget.classList.add("drag-over");
-}
-
-function handleDragLeave(e) {
-    e.preventDefault();
-    e.stopPropagation();
-    e.currentTarget.classList.remove("drag-over");
-}
-
-function handleFileDrop(e) {
-    e.preventDefault();
-    e.stopPropagation();
-    e.currentTarget.classList.remove("drag-over");
-
-    const files = e.dataTransfer.files;
-    if (files.length > 0) {
-        processUniversalFile(files[0]);
-    }
-}
-
-function handleFileSelect(e) {
-    const files = e.target.files;
-    if (files.length > 0) {
-        processUniversalFile(files[0]);
-    }
-}
-
-// Click handler for drop zone
-document.addEventListener("DOMContentLoaded", () => {
-    const dropZone = document.getElementById("universal-drop-zone");
-    if (dropZone) {
-        dropZone.addEventListener("click", () => {
-            document.getElementById("universal-file-input").click();
-        });
-    }
-});
-
-function processUniversalFile(file) {
-    const validTypes = [".csv", ".xlsx", ".xls"];
-    const ext = file.name.substring(file.name.lastIndexOf(".")).toLowerCase();
-
-    if (!validTypes.includes(ext)) {
-        showToast("Please upload a CSV or Excel file", "error");
-        return;
-    }
-
-    // For CSV, read as text directly
-    if (ext === ".csv") {
-        const reader = new FileReader();
-        reader.onload = (e) => {
-            document.getElementById("universal-data-text").value = e.target.result;
-            universalFileData = null; // Using text mode
-            showFileStatus(file.name);
-        };
-        reader.readAsText(file);
-    } else {
-        // For Excel, we'll send the file to the server
-        universalFileData = file;
-        showFileStatus(file.name);
-        document.getElementById("universal-data-text").value = "";
-        document.getElementById("universal-data-text").placeholder = `File loaded: ${file.name}\n\nData will be extracted from the Excel file.`;
-    }
-}
-
-function showFileStatus(filename) {
-    const status = document.getElementById("universal-file-status");
-    const nameEl = document.getElementById("universal-file-name");
-    if (status && nameEl) {
-        nameEl.textContent = `File: ${filename}`;
-        status.style.display = "block";
-    }
-}
-
-function clearUniversalFile() {
-    universalFileData = null;
-    document.getElementById("universal-data-text").value = "";
-    document.getElementById("universal-data-text").placeholder = `Paste data from Excel/CSV...
-
-Example formats (AI will understand ANY layout):
-Group A: 5.2, 5.4, 5.1, 5.3
-Group B: 7.2, 7.0, 7.4, 7.1
-
-OR
-
-Control  Treatment1  Treatment2
-5.2      6.1         7.2
-5.4      6.3         7.0
-5.1      5.9         7.4`;
-    document.getElementById("universal-file-status").style.display = "none";
-    document.getElementById("universal-file-input").value = "";
-}
-
-async function runUniversalAnalysis() {
-    const rawText = document.getElementById("universal-data-text")?.value || "";
-    const testType = document.getElementById("universal-test-type")?.value || "";
-    const context = document.getElementById("universal-context")?.value || "";
-
-    // Check if we have data
-    if (!rawText.trim() && !universalFileData) {
-        showToast("Paste data or upload a file first", "error");
-        return;
-    }
-
-    // Show progress stepper in modal
-    showProgressStepper();
-    setStageActive(1, "Starting...");
-
-    // Disable analyze button
-    const analyzeBtn = document.getElementById("universal-analyze-btn");
-    if (analyzeBtn) analyzeBtn.disabled = true;
-
-    switchTab("output");
-    appendOutput("command", "agent universal_analyze", ">>> Running 3-Stage Pipeline Analysis...\n    Stage 1: Data Organizer (AI or Python fallback)\n    Stage 2: Python Calculator (ANOVA + Tukey + Power)\n    Stage 3: Reporter (AI or Python fallback)");
-    setStatus("loading", "Stage 1: Organizing data...");
-
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 300000); // 5 minutes
-
-    // Simulate stage progress (actual progress comes from server)
-    setStageActive(1, "Organizing...");
-
-    try {
-        let resp;
-
-        if (universalFileData) {
-            // File upload mode
-            const formData = new FormData();
-            formData.append("file", universalFileData);
-            formData.append("proposal_context", context);
-            if (testType) formData.append("test_type", testType);
-
-            resp = await fetch("/api/agent/universal_analyze_file", {
-                method: "POST",
-                body: formData,
-                signal: controller.signal,
-            });
-        } else {
-            // Text paste mode
-            resp = await fetch("/api/agent/universal_analyze", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    raw_text: rawText,
-                    proposal_context: context,
-                    test_type: testType || null
-                }),
-                signal: controller.signal,
-            });
-        }
-
-        clearTimeout(timeoutId);
-        const data = await resp.json();
-
-        if (data.error || data.result?.error) {
-            const errorMsg = data.error || data.result.error;
-            const failedStage = data.result?.failed_stage || data.result?.layer || 1;
-
-            // Update progress stepper to show error
-            for (let i = 1; i < failedStage; i++) {
-                setStageComplete(i, "Done");
-            }
-            setStageError(failedStage, "Failed");
-
-            let output = "=" .repeat(60) + "\n";
-            output += "  ANALYSIS ERROR\n";
-            output += "=" .repeat(60) + "\n\n";
-            output += `Error: ${errorMsg}\n`;
-            if (data.result?.failed_stage) {
-                output += `Failed at: Stage ${data.result.failed_stage}\n`;
-            }
-            if (data.result?.details) {
-                output += `Details: ${JSON.stringify(data.result.details)}\n`;
-            }
-            if (data.result?.hint) {
-                output += `Hint: ${data.result.hint}\n`;
-            }
-            updateLastOutput("agent universal_analyze", output, "error");
-            setStatus("error", "Analysis failed");
-
-            // Re-enable button and hide stepper after delay
-            setTimeout(() => {
-                hideProgressStepper();
-                if (analyzeBtn) analyzeBtn.disabled = false;
-            }, 3000);
-            return;
-        }
-
-        // Mark all stages complete
-        setStageComplete(1, "Done");
-        setStageComplete(2, "Done");
-        setStageComplete(3, "Done");
-
-        const result = data.result;
-        let output = "=" .repeat(60) + "\n";
-        output += "  UNIVERSAL STATISTICAL ANALYSIS RESULTS\n";
-        output += "=" .repeat(60) + "\n\n";
-
-        // Stage 1: Extraction
-        if (result.layer1_extraction) {
-            output += ">>> STAGE 1: AI DATA ORGANIZER\n";
-            output += "-" .repeat(40) + "\n";
-            output += `  Groups found: ${result.layer1_extraction.groups_found.join(", ")}\n`;
-            output += "  Samples per group:\n";
-            Object.entries(result.layer1_extraction.samples_per_group).forEach(([g, n]) => {
-                output += `    ${g}: n=${n}\n`;
-            });
-            output += "\n";
-        }
-
-        // Stage 2: Statistics
-        if (result.layer2_statistics) {
-            const stats = result.layer2_statistics;
-
-            output += ">>> STAGE 2: PYTHON CALCULATOR (No AI Guessing)\n";
-            output += "-" .repeat(40) + "\n\n";
-
-            // Descriptive stats
-            if (stats.descriptive) {
-                output += "  DESCRIPTIVE STATISTICS\n";
-                output += "  " + "-".repeat(50) + "\n";
-                output += "  Group".padEnd(20) + "N".padStart(6) + "Mean".padStart(10) + "SD".padStart(10) + "   95% CI\n";
-                output += "  " + "-".repeat(56) + "\n";
-                Object.entries(stats.descriptive).forEach(([group, d]) => {
-                    let ciStr = "N/A";
-                    if (Array.isArray(d.ci_95) && d.ci_95.length === 2) {
-                        ciStr = `[${d.ci_95[0].toFixed(2)}, ${d.ci_95[1].toFixed(2)}]`;
-                    } else if (d.ci_95_lower != null && d.ci_95_upper != null) {
-                        ciStr = `[${d.ci_95_lower.toFixed(2)}, ${d.ci_95_upper.toFixed(2)}]`;
-                    }
-                    output += `  ${group.padEnd(18)} ${String(d.n).padStart(6)} ${d.mean.toFixed(3).padStart(10)} ${d.std.toFixed(3).padStart(10)}   ${ciStr}\n`;
-                });
-                output += "\n";
-            }
-
-            // ANOVA
-            if (stats.anova) {
-                output += "  ONE-WAY ANOVA\n";
-                output += "  " + "-".repeat(35) + "\n";
-                output += `  F-statistic: ${stats.anova.F_statistic}\n`;
-                output += `  p-value: ${stats.anova.p_value}`;
-                if (stats.anova.significant) {
-                    output += " ***\n";
-                    output += `  Result: SIGNIFICANT (p < ${stats.anova.alpha || 0.05})\n`;
-                } else {
-                    output += "\n";
-                    output += `  Result: Not significant (p >= ${stats.anova.alpha || 0.05})\n`;
-                }
-                output += `  Conclusion: ${stats.anova.conclusion || ""}\n\n`;
-            }
-
-            // Post-hoc Tukey
-            if (stats.posthoc && stats.posthoc.comparisons) {
-                output += "  POST-HOC TUKEY HSD\n";
-                output += "  " + "-".repeat(55) + "\n";
-                output += "  Comparison".padEnd(30) + "Diff".padStart(10) + "p-adj".padStart(12) + "Sig\n";
-                output += "  " + "-".repeat(55) + "\n";
-                stats.posthoc.comparisons.forEach(c => {
-                    const comp = `${c.group1} vs ${c.group2}`;
-                    const sig = c.significant ? " ***" : "";
-                    output += `  ${comp.padEnd(28)} ${c.mean_diff.toFixed(3).padStart(10)} ${c.p_adj.toFixed(6).padStart(12)}${sig}\n`;
-                });
-                output += "\n";
-            }
-
-            // Power Analysis
-            if (stats.power_analysis && !stats.power_analysis.error) {
-                const pa = stats.power_analysis;
-                output += "  POWER ANALYSIS\n";
-                output += "  " + "-".repeat(40) + "\n";
-                output += `  Effect size (Cohen's f): ${pa.effect_size_f}\n`;
-                output += `  Effect interpretation:   ${pa.effect_interpretation}\n`;
-                output += `  Observed power:          ${pa.observed_power}\n`;
-                output += `  Current N per group:     ${pa.current_n_per_group}\n`;
-                if (!pa.adequate_power) {
-                    output += `  Recommended N per group: ${pa.recommended_n_per_group}\n`;
-                    output += `  Note: ${pa.power_note}\n`;
-                } else {
-                    output += "  Power is adequate (>= 0.80)\n";
-                }
-                output += "\n";
-            }
-        }
-
-        // Stage 3: Interpretation
-        if (result.layer3_interpretation) {
-            output += ">>> STAGE 3: AI REPORTER (Context-Aware Interpretation)\n";
-            output += "-" .repeat(40) + "\n\n";
-
-            const interp = result.layer3_interpretation;
-            if (interp.test_type) {
-                output += `  Test Type: ${interp.test_type.detected_type || "Auto-detected"}\n`;
-                output += `  Interpretation: ${interp.test_type.category === "higher_better" ? "Higher = Better" : interp.test_type.category === "lower_better" ? "Lower = Better" : "Neutral"}\n\n`;
-            }
-
-            if (interp.report) {
-                output += "  ACADEMIC RESULTS PARAGRAPH:\n";
-                output += "  " + "=".repeat(45) + "\n\n";
-                // Word wrap the report
-                const words = interp.report.split(" ");
-                let line = "  ";
-                words.forEach(word => {
-                    if (line.length + word.length > 70) {
-                        output += line + "\n";
-                        line = "  " + word + " ";
-                    } else {
-                        line += word + " ";
-                    }
-                });
-                output += line + "\n";
-            }
-        }
-
-        output += "\n" + "=" .repeat(60) + "\n";
-        output += "  3-STAGE PIPELINE COMPLETE\n";
-        output += "=" .repeat(60);
-
-        updateLastOutput("agent universal_analyze", output);
-        setStatus("ok", "3-Stage Pipeline complete");
-        showToast("Universal analysis complete", "success");
-
-        // Cleanup: clear file data, hide stepper, re-enable button, close modal
-        universalFileData = null;
-        setTimeout(() => {
-            hideProgressStepper();
-            const analyzeBtn = document.getElementById("universal-analyze-btn");
-            if (analyzeBtn) analyzeBtn.disabled = false;
-            closeModal("modal-universal-analyze");
-        }, 1500);
-
-    } catch (err) {
-        clearTimeout(timeoutId);
-
-        // Mark error in progress stepper
-        setStageError(1, "Failed");
-
-        if (err.name === "AbortError") {
-            updateLastOutput("agent universal_analyze", "Error: Analysis timed out. Make sure Ollama is running.", "error");
-        } else {
-            updateLastOutput("agent universal_analyze", `Error: ${err.message}`, "error");
-        }
-        setStatus("error", "Analysis failed");
-
-        // Cleanup on error
-        setTimeout(() => {
-            hideProgressStepper();
-            const analyzeBtn = document.getElementById("universal-analyze-btn");
-            if (analyzeBtn) analyzeBtn.disabled = false;
-        }, 3000);
-    }
-}
-
-// ============================================================
-// AGENT: LITERATURE REVIEW
-// ============================================================
-async function runLiteratureReview() {
-    const topic = document.getElementById("lit-review-topic")?.value || "";
-    const context = document.getElementById("lit-review-context")?.value || "";
-
-    if (!topic.trim()) {
-        showToast("Enter a research topic", "error");
-        return;
-    }
-
-    closeModal("modal-lit-review");
-    switchTab("output");
-    appendOutput("command", `agent literature_review "${topic.substring(0, 40)}..."`, ">>> Searching literature and generating review...");
-    setStatus("loading", "Agent generating literature review...");
-
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 180000);
-
-    try {
-        const resp = await fetch("/api/agent/literature_review", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ topic, context }),
-            signal: controller.signal,
-        });
-        clearTimeout(timeoutId);
-        const data = await resp.json();
-
-        if (data.error || data.result?.error) {
-            updateLastOutput("agent literature_review", data.error || data.result.error, "error");
-            setStatus("error", "Generation failed");
-            return;
-        }
-
-        const result = data.result;
-        let output = "=" .repeat(60) + "\n";
-        output += "  LITERATURE REVIEW\n";
-        output += "=" .repeat(60) + "\n\n";
-        output += `Topic: ${topic}\n`;
-        output += `Sources searched: ${result.sources_searched || 0}\n\n`;
-
-        // Review text
-        if (result.review) {
-            output += "--- Review ---\n\n";
-            output += result.review + "\n\n";
-        }
-
-        // References
-        if (result.references?.length > 0) {
-            output += "--- References ---\n";
-            result.references.forEach(ref => {
-                output += `  [${ref.number}] ${ref.title}\n`;
-                output += `      ${ref.url}\n`;
-            });
-        }
-
-        output += "\n" + "=" .repeat(60);
-        updateLastOutput("agent literature_review", output);
-        setStatus("ok", "Review complete");
-        showToast("Literature review generated", "success");
-
-    } catch (err) {
-        clearTimeout(timeoutId);
-        if (err.name === "AbortError") {
-            updateLastOutput("agent literature_review", "Error: Generation timed out.", "error");
-        } else {
-            updateLastOutput("agent literature_review", `Error: ${err.message}`, "error");
-        }
-        setStatus("error", "Generation failed");
-    }
+function wordWrap(text, maxLen) {
+    const words = text.split(" ");
+    const lines = [];
+    let cur = "";
+    words.forEach(w => {
+        if (cur.length + w.length + 1 > maxLen) { lines.push(cur); cur = w; }
+        else cur = cur ? cur + " " + w : w;
+    });
+    if (cur) lines.push(cur);
+    return lines;
 }

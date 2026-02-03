@@ -3,1108 +3,457 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SolarSTATA - AI-Powered Statistical Analysis</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=Silkscreen:wght@400;700&family=VT323&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/static/css/stata.css">
+    <title>SolarSTATA</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/stata.css') }}">
 </head>
 <body>
-<div id="app-container">
-
-    <!-- ====== MENU BAR ====== -->
-    <div id="menu-bar">
-        <div class="app-title">SolarSTATA <span>19</span></div>
-
-        <div class="menu-item">
-            File
-            <div class="menu-dropdown">
-                <div class="menu-dropdown-item" onclick="openFile()">Open Data... <span class="shortcut">Ctrl+O</span></div>
-                <div class="menu-separator"></div>
-                <div class="menu-dropdown-item" onclick="clearOutput()">Clear Output</div>
-            </div>
-        </div>
-
-        <div class="menu-item">
-            Statistics
-            <div class="menu-dropdown">
-                <div class="menu-dropdown-item" onclick="openModal('modal-smart-analyze')">[?] Smart Router (Auto-Select)</div>
-                <div class="menu-separator"></div>
-                <div class="menu-dropdown-item" onclick="openModal('modal-descriptive')">Descriptive Statistics</div>
-                <div class="menu-dropdown-item" onclick="openModal('modal-ttest')">T-Tests</div>
-                <div class="menu-dropdown-item" onclick="openModal('modal-anova')">ANOVA</div>
-                <div class="menu-dropdown-item" onclick="openModal('modal-chi')">Chi-Square Test</div>
-                <div class="menu-separator"></div>
-                <div class="menu-dropdown-item" onclick="openModal('modal-regression')">Regression</div>
-                <div class="menu-dropdown-item" onclick="openModal('modal-correlation')">Correlation</div>
-                <div class="menu-separator"></div>
-                <div class="menu-dropdown-item" onclick="openModal('modal-nonparametric')">Non-Parametric Tests</div>
-                <div class="menu-dropdown-item" onclick="openModal('modal-survival')">Survival Analysis</div>
-                <div class="menu-separator"></div>
-                <div class="menu-dropdown-item" onclick="openModal('modal-power')">Power Analysis</div>
-                <div class="menu-dropdown-item" onclick="openModal('modal-samplesize')">Sample Size Calculator</div>
-                <div class="menu-dropdown-item" onclick="openModal('modal-samplesize-text')">[N] Sample Size from Text</div>
-            </div>
-        </div>
-
-        <div class="menu-item">
-            AI Assistant
-            <div class="menu-dropdown">
-                <div class="menu-dropdown-item" onclick="openModal('modal-universal-analyze')" style="color:var(--accent-cyan);">[*] Universal Analysis Agent</div>
-                <div class="menu-separator"></div>
-                <div class="menu-dropdown-item" onclick="runAIAnalysis()">[AI] Full Analysis <span class="shortcut">F5</span></div>
-                <div class="menu-dropdown-item" onclick="openModal('modal-smart-analyze')">[?] Smart Statistical Router</div>
-                <div class="menu-separator"></div>
-                <div class="menu-dropdown-item" onclick="openModal('modal-messy-data')">[AGENT] Messy Data Analysis</div>
-                <div class="menu-dropdown-item" onclick="openModal('modal-sample-size-dual')">[AGENT] Sample Size Calculator</div>
-                <div class="menu-dropdown-item" onclick="openModal('modal-lit-review')">[AGENT] Literature Review</div>
-                <div class="menu-separator"></div>
-                <div class="menu-dropdown-item" onclick="openModal('modal-proposal-upload')">[+] Upload Proposal (RAG)</div>
-                <div class="menu-dropdown-item" onclick="openModal('modal-ai-proposal')">Analyze Proposal</div>
-                <div class="menu-dropdown-item" onclick="openModal('modal-ai-research')">[#] Literature Search</div>
-                <div class="menu-separator"></div>
-                <div class="menu-dropdown-item" onclick="openModal('modal-samplesize-text')">[N] Sample Size from Text</div>
-            </div>
-        </div>
-
-        <div class="menu-item">
-            Help
-            <div class="menu-dropdown">
-                <div class="menu-dropdown-item" onclick="executeCommand('help')">Command Reference</div>
-                <div class="menu-dropdown-item" onclick="showToast('SolarSTATA v1.0 - AI-Powered Statistical Analysis')">About</div>
-            </div>
-        </div>
-    </div>
-
-    <!-- ====== TOOLBAR ====== -->
-    <div id="toolbar">
-        <button class="toolbar-btn" onclick="openFile()" title="Open Data (Ctrl+O)">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
-            Open
-        </button>
-        <div class="toolbar-separator"></div>
-        <button class="toolbar-btn" onclick="openModal('modal-descriptive')" title="Descriptive Statistics">Describe</button>
-        <button class="toolbar-btn" onclick="openModal('modal-ttest')" title="T-Test">T-Test</button>
-        <button class="toolbar-btn" onclick="openModal('modal-anova')" title="ANOVA">ANOVA</button>
-        <button class="toolbar-btn" onclick="openModal('modal-chi')" title="Chi-Square">Chi2</button>
-        <button class="toolbar-btn" onclick="openModal('modal-regression')" title="Regression">Regress</button>
-        <button class="toolbar-btn" onclick="openModal('modal-correlation')" title="Correlation">Corr</button>
-        <div class="toolbar-separator"></div>
-        <button class="toolbar-btn" onclick="runAIAnalysis()" title="Run AI Analysis (F5)" style="color:var(--accent-cyan)">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 8v4l3 3"/></svg>
-            AI Analyze
-        </button>
-        <div class="toolbar-separator"></div>
-        <button class="toolbar-btn" onclick="openModal('modal-power')" title="Power Analysis">Power</button>
-        <button class="toolbar-btn" onclick="openModal('modal-samplesize')" title="Sample Size">Sample N</button>
-        <div class="toolbar-separator"></div>
-        <div class="model-selector">
-            <label>Model:</label>
-            <select id="model-select" onchange="changeModel(this.value)">
-                <option value="llama3.2">llama3.2</option>
-            </select>
-            <span id="ollama-status" class="status-indicator-small" title="Checking..."></span>
-        </div>
-    </div>
-
-    <!-- Fallback Mode Banner -->
-    <div id="fallback-mode-banner" style="display:none;background:var(--accent-yellow);color:#000;padding:4px 16px;font-size:11px;text-align:center;font-weight:600;">
-        Ollama not available &mdash; Python fallback active for data parsing &amp; report generation. Statistics engine unaffected.
-    </div>
-
-    <!-- ====== MAIN AREA ====== -->
-    <div id="main-area">
-
-        <!-- Left: Variables Panel -->
-        <div id="variables-panel">
-            <div class="panel-header">
-                Variables <span class="count" id="var-count">0</span>
-            </div>
-            <div id="variables-list">
-                <div style="padding:12px;color:var(--text-muted);font-size:11px;">
-                    Load a dataset to see variables
-                </div>
-            </div>
-            <div style="padding:8px;border-top:1px solid var(--border-color);font-size:10px;color:var(--text-muted);">
-                Selected: <span id="selected-vars-display">None</span>
-            </div>
-        </div>
-
-        <!-- Center: Main Content -->
-        <div id="center-area">
-            <!-- Tab Bar -->
-            <div id="tab-bar">
-                <div class="tab active" data-tab="welcome">Home</div>
-                <div class="tab" data-tab="data">Data Editor</div>
-                <div class="tab" data-tab="output">Output</div>
-            </div>
-
-            <!-- Welcome Tab -->
-            <div class="tab-content active" id="tab-welcome">
-                <div id="welcome-screen">
-                    <h1><strong>Solar</strong>STATA</h1>
-                    <div class="version">AI-Powered Statistical Analysis Engine v1.0</div>
-                    <div class="subtitle">
-                        A Stata 19-equivalent application with integrated AI that analyzes your data,
-                        searches literature, calculates sample sizes, and selects appropriate statistical tests automatically.
-                    </div>
-                    <div class="quick-actions">
-                        <div class="quick-action" onclick="openModal('modal-universal-analyze')" style="border-color:var(--accent-cyan);">
-                            <div class="icon ascii-icon">[*]</div>
-                            <div class="label">Universal Agent</div>
-                            <div class="desc">ANY dental data format</div>
-                        </div>
-                        <div class="quick-action" onclick="openFile()">
-                            <div class="icon ascii-icon">[+]</div>
-                            <div class="label">Open Data</div>
-                            <div class="desc">CSV, Excel, Stata (.dta)</div>
-                        </div>
-                        <div class="quick-action" onclick="openModal('modal-smart-analyze')">
-                            <div class="icon ascii-icon">[?]</div>
-                            <div class="label">Smart Router</div>
-                            <div class="desc">Auto-select test</div>
-                        </div>
-                        <div class="quick-action" onclick="openModal('modal-samplesize-text')">
-                            <div class="icon ascii-icon">[N]</div>
-                            <div class="label">Sample Size</div>
-                            <div class="desc">Parse Mean/SD from text</div>
-                        </div>
-                        <div class="quick-action" onclick="openModal('modal-ai-research')">
-                            <div class="icon ascii-icon">[#]</div>
-                            <div class="label">Literature</div>
-                            <div class="desc">PubMed & CrossRef</div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Data Editor Tab -->
-            <div class="tab-content" id="tab-data">
-                <div id="data-editor">
-                    <div style="padding:20px;color:var(--text-muted);">No data loaded. Use File &gt; Open to load a dataset.</div>
-                </div>
-            </div>
-
-            <!-- Output Tab -->
-            <div class="tab-content" id="tab-output">
-                <div id="output-area">
-                    <div class="output-block">
-                        <div class="output-header">SolarSTATA 19.0 - AI-Powered Statistical Analysis</div>
-                        <div class="output-result">Type 'help' for available commands or use the menu bar.</div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Command Bar -->
-            <div id="command-bar">
-                <label>Command:</label>
-                <input type="text" id="command-input"
-                    placeholder="Enter Stata command (e.g., summarize, regress y x1 x2, tabulate var1 var2, chi2)"
-                    autocomplete="off">
-            </div>
-        </div>
-
-        <!-- Right Panel: Properties + AI Chat -->
-        <div id="right-panel">
-            <div id="right-tabs">
-                <div class="right-tab active" data-panel="properties-content">Properties</div>
-                <div class="right-tab" data-panel="ai-chat-container">AI Chat</div>
-            </div>
-
-            <!-- Properties -->
-            <div class="right-content active" id="properties-content">
-                <div class="prop-section">
-                    <div class="prop-section-title">Dataset</div>
-                    <div class="prop-row">
-                        <span class="prop-label">Status</span>
-                        <span class="prop-value">No data</span>
-                    </div>
-                </div>
-            </div>
-
-            <!-- AI Chat -->
-            <div class="right-content" id="ai-chat-container" style="display:none;flex-direction:column;padding:0;">
-                <div id="ai-chat-area">
-                    <div class="ai-message system">
-                        Ask me anything about your data. I can suggest tests, explain results, or search literature.
-                    </div>
-                </div>
-                <div id="ai-input-area">
-                    <textarea id="ai-input" placeholder="Ask the AI assistant..." rows="1"></textarea>
-                    <button id="ai-send-btn" onclick="sendAIMessage()">Send</button>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- ====== STATUS BAR ====== -->
-    <div id="status-bar">
-        <div class="status-left">
-            <div class="status-indicator">
-                <div class="status-dot" id="status-dot"></div>
-                <span id="status-message">Ready</span>
-            </div>
-        </div>
-        <div>SolarSTATA 19.0</div>
-    </div>
-</div>
-
-<!-- Hidden file input -->
-<input type="file" id="file-input" accept=".csv,.xlsx,.xls,.dta,.tsv,.txt" style="display:none">
 
 <!-- ============================================================
-     MODAL DIALOGS
+     TOP TOOLBAR
+     ============================================================ -->
+<header id="toolbar">
+    <div class="app-logo">
+        <div class="app-logo-icon">S</div>
+        <span class="app-logo-text">Solar<span>STATA</span></span>
+    </div>
+
+    <div class="toolbar-separator"></div>
+
+    <button class="toolbar-btn" id="btn-open" title="Open data file (Ctrl+O)">Open</button>
+    <button class="toolbar-btn" id="btn-save-log" title="Save output log">Save Log</button>
+    <input type="file" id="file-input" accept=".csv,.xlsx,.xls,.dta" hidden>
+
+    <div class="toolbar-separator"></div>
+
+    <div class="model-selector">
+        <label for="model-select">Model:</label>
+        <select id="model-select"></select>
+        <span id="ollama-status" class="status-dot connecting" title="Checking Ollama..."></span>
+    </div>
+
+    <button class="toolbar-btn toolbar-btn-help" id="btn-help" title="Help">?</button>
+</header>
+
+<!-- ============================================================
+     FALLBACK MODE BANNER
+     ============================================================ -->
+<div id="fallback-banner">
+    <span class="banner-icon">*</span>
+    Python fallback active &mdash; Ollama not available. Statistics engine unaffected.
+    <button class="banner-dismiss" id="dismiss-banner">Dismiss</button>
+</div>
+
+<!-- ============================================================
+     MAIN AREA (3-column layout)
+     ============================================================ -->
+<main id="main-area">
+
+    <!-- ====== LEFT PANEL: Variables ====== -->
+    <aside id="variables-panel">
+        <div class="panel-header">
+            <span>Variables</span>
+            <span class="count" id="var-count">0</span>
+        </div>
+        <div class="var-search">
+            <input type="text" id="var-search-input" placeholder="Filter variables...">
+        </div>
+        <div id="variables-list"></div>
+        <div style="padding:8px; border-top:1px solid var(--border-color);">
+            <button class="btn btn-primary btn-sm" id="btn-smart" style="width:100%" title="Auto-select best test for selected variables">Smart Analysis</button>
+        </div>
+    </aside>
+
+    <!-- ====== CENTER AREA ====== -->
+    <section id="center-area">
+
+        <!-- Tab Bar -->
+        <nav id="tab-bar">
+            <div class="tab active" data-tab="output">Output</div>
+            <div class="tab" data-tab="data">Data</div>
+            <div class="tab" data-tab="graph">Graph</div>
+        </nav>
+
+        <!-- Tab: Output -->
+        <div id="tab-output" class="tab-content active">
+            <div id="output-area"></div>
+        </div>
+
+        <!-- Tab: Data -->
+        <div id="tab-data" class="tab-content">
+            <div id="data-viewer">
+                <div class="empty-state" id="data-empty">
+                    <div class="empty-state-icon">[ ]</div>
+                    <div class="empty-state-title">No Data Loaded</div>
+                    <div class="empty-state-desc">Open a CSV, Excel, or Stata file to view data here.</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Tab: Graph -->
+        <div id="tab-graph" class="tab-content">
+            <div class="empty-state">
+                <div class="empty-state-icon">[~]</div>
+                <div class="empty-state-title">No Graph</div>
+                <div class="empty-state-desc">Run an analysis to generate a visualization.</div>
+            </div>
+        </div>
+
+        <!-- Command Bar -->
+        <div id="command-bar">
+            <span class="prompt">.</span>
+            <input type="text" id="command-input" placeholder="type command or help" autocomplete="off" spellcheck="false">
+        </div>
+
+    </section>
+
+    <!-- ====== RIGHT PANEL ====== -->
+    <aside id="right-panel">
+
+        <!-- Right Panel Tabs -->
+        <div id="right-tabs">
+            <div class="right-tab active" data-panel="tests-content">Tests</div>
+            <div class="right-tab" data-panel="agent-content">AI Agent</div>
+        </div>
+
+        <!-- Tests Panel -->
+        <div id="tests-content" class="right-content active">
+            <div class="prop-section">
+                <div class="prop-section-title">Descriptive</div>
+                <div class="d-flex flex-wrap gap-1">
+                    <button class="btn btn-outline btn-sm" data-test="descriptive">Describe</button>
+                    <button class="btn btn-outline btn-sm" data-test="tabulate">Tabulate</button>
+                    <button class="btn btn-outline btn-sm" data-test="normality">Normality</button>
+                </div>
+            </div>
+            <div class="prop-section">
+                <div class="prop-section-title">T-Tests</div>
+                <div class="d-flex flex-wrap gap-1">
+                    <button class="btn btn-outline btn-sm" data-test="ttest_one">One-Sample</button>
+                    <button class="btn btn-outline btn-sm" data-test="ttest_two">Two-Sample</button>
+                    <button class="btn btn-outline btn-sm" data-test="ttest_paired">Paired</button>
+                </div>
+            </div>
+            <div class="prop-section">
+                <div class="prop-section-title">ANOVA</div>
+                <div class="d-flex flex-wrap gap-1">
+                    <button class="btn btn-outline btn-sm" data-test="anova_oneway">One-Way</button>
+                    <button class="btn btn-outline btn-sm" data-test="anova_twoway">Two-Way</button>
+                </div>
+            </div>
+            <div class="prop-section">
+                <div class="prop-section-title">Categorical</div>
+                <div class="d-flex flex-wrap gap-1">
+                    <button class="btn btn-outline btn-sm" data-test="chi_square">Chi-Square</button>
+                    <button class="btn btn-outline btn-sm" data-test="fisher">Fisher</button>
+                </div>
+            </div>
+            <div class="prop-section">
+                <div class="prop-section-title">Regression</div>
+                <div class="d-flex flex-wrap gap-1">
+                    <button class="btn btn-outline btn-sm" data-test="regression">OLS</button>
+                    <button class="btn btn-outline btn-sm" data-test="logistic">Logistic</button>
+                    <button class="btn btn-outline btn-sm" data-test="probit">Probit</button>
+                </div>
+            </div>
+            <div class="prop-section">
+                <div class="prop-section-title">Non-Parametric</div>
+                <div class="d-flex flex-wrap gap-1">
+                    <button class="btn btn-outline btn-sm" data-test="mann_whitney">Mann-Whitney</button>
+                    <button class="btn btn-outline btn-sm" data-test="wilcoxon">Wilcoxon</button>
+                    <button class="btn btn-outline btn-sm" data-test="kruskal_wallis">Kruskal-Wallis</button>
+                </div>
+            </div>
+            <div class="prop-section">
+                <div class="prop-section-title">Correlation &amp; Post-Hoc</div>
+                <div class="d-flex flex-wrap gap-1">
+                    <button class="btn btn-outline btn-sm" data-test="correlation">Correlation</button>
+                    <button class="btn btn-outline btn-sm" data-test="tukey">Tukey HSD</button>
+                    <button class="btn btn-outline btn-sm" data-test="bonferroni">Bonferroni</button>
+                </div>
+            </div>
+            <div class="prop-section">
+                <div class="prop-section-title">Repeated Measures</div>
+                <div class="d-flex flex-wrap gap-1">
+                    <button class="btn btn-outline btn-sm" data-test="rm_anova">RM-ANOVA</button>
+                    <button class="btn btn-outline btn-sm" data-test="friedman">Friedman</button>
+                </div>
+            </div>
+            <div class="prop-section">
+                <div class="prop-section-title">Survival</div>
+                <div class="d-flex flex-wrap gap-1">
+                    <button class="btn btn-outline btn-sm" data-test="kaplan_meier">Kaplan-Meier</button>
+                    <button class="btn btn-outline btn-sm" data-test="cox">Cox PH</button>
+                </div>
+            </div>
+            <div class="prop-section">
+                <div class="prop-section-title">Power &amp; Sample Size</div>
+                <div class="d-flex flex-wrap gap-1">
+                    <button class="btn btn-outline btn-sm" data-test="power">Power</button>
+                    <button class="btn btn-outline btn-sm" data-test="sample_size">Sample Size</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- AI Agent Panel -->
+        <div id="agent-content" class="right-content">
+            <div class="prop-section">
+                <div class="prop-section-title">3-Stage Pipeline</div>
+                <button class="btn btn-primary btn-sm" id="btn-universal" style="width:100%; margin-bottom:8px;">Universal Analysis</button>
+            </div>
+            <div class="prop-section">
+                <div class="prop-section-title">AI Features</div>
+                <div class="d-flex flex-column gap-2">
+                    <button class="btn btn-outline btn-sm" id="btn-ai-analyze">AI Analyze</button>
+                    <button class="btn btn-outline btn-sm" id="btn-messy-data">Messy Data</button>
+                    <button class="btn btn-outline btn-sm" id="btn-sample-size-text">Sample Size (Text)</button>
+                    <button class="btn btn-outline btn-sm" id="btn-lit-review">Literature Review</button>
+                </div>
+            </div>
+        </div>
+
+    </aside>
+
+</main>
+
+<!-- ============================================================
+     STATUS BAR
+     ============================================================ -->
+<footer id="status-bar">
+    <div class="status-left">
+        <div class="status-item">
+            <span class="status-dot" id="status-dot"></span>
+            <span id="status-message">Ready</span>
+        </div>
+    </div>
+    <div class="status-right">
+        <span class="status-item" id="status-data">No data</span>
+        <span class="status-item">SolarSTATA v2.0</span>
+    </div>
+</footer>
+
+<!-- ============================================================
+     MODALS
      ============================================================ -->
 
-<!-- Descriptive Statistics -->
-<div class="modal-overlay" id="modal-descriptive">
+<!-- Generic Stat Test Modal -->
+<div class="modal-overlay" id="stat-modal">
     <div class="modal">
         <div class="modal-header">
-            <div class="modal-title">Descriptive Statistics</div>
-            <div class="modal-close" onclick="closeModal('modal-descriptive')">&times;</div>
+            <span class="modal-title" id="stat-modal-title"></span>
+            <button class="modal-close" data-dismiss="stat-modal">&times;</button>
         </div>
-        <div class="modal-body">
-            <div class="form-group">
-                <label>Variables (hold Ctrl to select multiple)</label>
-                <select id="desc-vars" class="form-control var-multi-selector" data-type="numeric" multiple size="6"></select>
-            </div>
-            <div class="form-group">
-                <label><input type="checkbox" id="desc-detail" checked> Show detailed statistics (percentiles, skewness, kurtosis)</label>
-            </div>
+        <div class="modal-body" id="stat-modal-body">
+            <!-- Populated dynamically per test type -->
         </div>
         <div class="modal-footer">
-            <button class="btn btn-secondary" onclick="closeModal('modal-descriptive')">Cancel</button>
-            <button class="btn btn-primary" onclick="runDescriptive()">Run</button>
+            <button class="btn btn-secondary" data-dismiss="stat-modal">Cancel</button>
+            <button class="btn btn-primary" id="stat-modal-run">Run</button>
         </div>
     </div>
 </div>
 
-<!-- T-Test -->
-<div class="modal-overlay" id="modal-ttest">
-    <div class="modal">
+<!-- Universal Analysis Modal (3-Stage Pipeline) -->
+<div class="modal-overlay" id="universal-modal">
+    <div class="modal modal-lg">
         <div class="modal-header">
-            <div class="modal-title">T-Test</div>
-            <div class="modal-close" onclick="closeModal('modal-ttest')">&times;</div>
+            <span class="modal-title">3-Stage Pipeline Analysis</span>
+            <button class="modal-close" data-dismiss="universal-modal">&times;</button>
         </div>
         <div class="modal-body">
+
+            <!-- Pipeline description -->
+            <div class="stat-panel" style="margin-bottom:16px">
+                <div class="stat-panel-header">
+                    <span class="stat-panel-title">How It Works</span>
+                </div>
+                <div class="stat-panel-body text-sm" style="color:var(--text-muted)">
+                    <div class="d-flex gap-2 align-center mb-2">
+                        <span class="badge badge-yellow">Stage 1</span>
+                        <span><strong>Data Organizer</strong> &mdash; AI/Python parses raw data into structured format</span>
+                    </div>
+                    <div class="d-flex gap-2 align-center mb-2">
+                        <span class="badge badge-green">Stage 2</span>
+                        <span><strong>Calculator</strong> &mdash; Python computes ANOVA + Tukey HSD + Power Analysis</span>
+                    </div>
+                    <div class="d-flex gap-2 align-center">
+                        <span class="badge badge-blue">Stage 3</span>
+                        <span><strong>Reporter</strong> &mdash; AI/Python writes context-aware report</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Data input -->
             <div class="form-group">
-                <label>Test Type</label>
-                <select id="ttest-type" class="form-control" onchange="updateTTestForm()">
-                    <option value="two_sample">Two-Sample (Independent Groups)</option>
-                    <option value="one_sample">One-Sample</option>
-                    <option value="paired">Paired</option>
+                <label>Paste data (from Excel, CSV, or any layout)</label>
+                <textarea class="form-control" id="universal-data-text" rows="8" placeholder="Paste data here...&#10;&#10;Example:&#10;Group A: 5.2, 5.4, 5.1, 5.3&#10;Group B: 7.2, 7.0, 7.4, 7.1"></textarea>
+                <div class="form-row mt-2">
+                    <button class="btn btn-secondary btn-sm" id="universal-file-btn">Upload File</button>
+                    <input type="file" id="universal-file-input" accept=".csv,.xlsx,.xls" hidden>
+                    <span id="universal-file-name" class="text-sm text-muted"></span>
+                </div>
+            </div>
+
+            <!-- Context -->
+            <div class="form-group">
+                <label>Proposal context (optional)</label>
+                <input class="form-control" type="text" id="universal-context" placeholder="e.g., Microhardness of dental composites after soy milk immersion">
+            </div>
+
+            <!-- Direction preference -->
+            <div class="form-group">
+                <label>Direction preference</label>
+                <select class="form-control" id="universal-test-type">
+                    <option value="">Auto-detect</option>
+                    <option value="higher_better">Higher is better (e.g., hardness, bond strength)</option>
+                    <option value="lower_better">Lower is better (e.g., biofilm, roughness)</option>
                 </select>
             </div>
-            <div id="ttest-twosample-fields">
-                <div class="form-group">
-                    <label>Test Variable (Numeric)</label>
-                    <select id="ttest-var" class="form-control var-selector" data-type="numeric"></select>
+
+            <!-- Progress Stepper -->
+            <div id="universal-stepper" class="progress-stepper" style="display:none">
+                <div class="progress-stage waiting" id="stage-1">
+                    <div class="stage-icon" id="stage-1-icon">1</div>
+                    <div class="stage-info">
+                        <div class="stage-label">Data Organizer</div>
+                        <div class="stage-status" id="stage-1-status">Waiting</div>
+                    </div>
                 </div>
-                <div class="form-group">
-                    <label>Group Variable</label>
-                    <select id="ttest-group" class="form-control var-selector" data-type="categorical"></select>
+                <div class="progress-stage waiting" id="stage-2">
+                    <div class="stage-icon" id="stage-2-icon">2</div>
+                    <div class="stage-info">
+                        <div class="stage-label">Calculator</div>
+                        <div class="stage-status" id="stage-2-status">Waiting</div>
+                    </div>
+                </div>
+                <div class="progress-stage waiting" id="stage-3">
+                    <div class="stage-icon" id="stage-3-icon">3</div>
+                    <div class="stage-info">
+                        <div class="stage-label">Reporter</div>
+                        <div class="stage-status" id="stage-3-status">Waiting</div>
+                    </div>
                 </div>
             </div>
-            <div id="ttest-onesample-fields" style="display:none">
-                <div class="form-group">
-                    <label>Hypothesized Mean (mu)</label>
-                    <input type="number" id="ttest-mu" class="form-control" value="0" step="any">
-                </div>
-            </div>
-            <div id="ttest-paired-fields" style="display:none">
-                <div class="form-group">
-                    <label>Variable 1</label>
-                    <select id="ttest-var1" class="form-control var-selector" data-type="numeric"></select>
-                </div>
-                <div class="form-group">
-                    <label>Variable 2</label>
-                    <select id="ttest-var2" class="form-control var-selector" data-type="numeric"></select>
-                </div>
-            </div>
+
         </div>
         <div class="modal-footer">
-            <button class="btn btn-secondary" onclick="closeModal('modal-ttest')">Cancel</button>
-            <button class="btn btn-primary" onclick="runTTest()">Run</button>
+            <button class="btn btn-secondary" data-dismiss="universal-modal">Cancel</button>
+            <button class="btn btn-primary" id="universal-run-btn">Analyze</button>
         </div>
     </div>
 </div>
 
-<!-- ANOVA -->
-<div class="modal-overlay" id="modal-anova">
+<!-- AI Analysis Modal -->
+<div class="modal-overlay" id="ai-modal">
     <div class="modal">
         <div class="modal-header">
-            <div class="modal-title">Analysis of Variance (ANOVA)</div>
-            <div class="modal-close" onclick="closeModal('modal-anova')">&times;</div>
+            <span class="modal-title">AI Analysis</span>
+            <button class="modal-close" data-dismiss="ai-modal">&times;</button>
         </div>
         <div class="modal-body">
             <div class="form-group">
-                <label>Type</label>
-                <select id="anova-type" class="form-control" onchange="updateAnovaForm()">
-                    <option value="oneway">One-Way ANOVA</option>
-                    <option value="twoway">Two-Way ANOVA</option>
-                </select>
+                <label>Proposal text</label>
+                <textarea class="form-control" id="ai-proposal-text" rows="5" placeholder="Paste your research proposal or study description..."></textarea>
             </div>
             <div class="form-group">
-                <label>Dependent Variable</label>
-                <select id="anova-depvar" class="form-control var-selector" data-type="numeric"></select>
+                <label>Question</label>
+                <textarea class="form-control" id="ai-question" rows="3" placeholder="What would you like the AI to analyze?"></textarea>
             </div>
-            <div id="anova-oneway-fields">
-                <div class="form-group">
-                    <label>Group Variable</label>
-                    <select id="anova-groupvar" class="form-control var-selector" data-type="categorical"></select>
-                </div>
-            </div>
-            <div id="anova-twoway-fields" style="display:none">
-                <div class="form-group">
-                    <label>Factor 1</label>
-                    <select id="anova-factor1" class="form-control var-selector" data-type="categorical"></select>
-                </div>
-                <div class="form-group">
-                    <label>Factor 2</label>
-                    <select id="anova-factor2" class="form-control var-selector" data-type="categorical"></select>
-                </div>
-                <div class="form-group">
-                    <label><input type="checkbox" id="anova-interaction" checked> Include Interaction Term</label>
-                </div>
+            <div class="form-check">
+                <input type="checkbox" id="ai-lit-search" checked>
+                <label for="ai-lit-search">Include literature search</label>
             </div>
         </div>
         <div class="modal-footer">
-            <button class="btn btn-secondary" onclick="closeModal('modal-anova')">Cancel</button>
-            <button class="btn btn-primary" onclick="runANOVA()">Run</button>
+            <button class="btn btn-secondary" data-dismiss="ai-modal">Cancel</button>
+            <button class="btn btn-primary" id="ai-run-btn">Analyze</button>
         </div>
     </div>
 </div>
 
-<!-- Chi-Square -->
-<div class="modal-overlay" id="modal-chi">
+<!-- Sample Size (Text) Modal -->
+<div class="modal-overlay" id="sample-size-modal">
     <div class="modal">
         <div class="modal-header">
-            <div class="modal-title">Chi-Square Test of Independence</div>
-            <div class="modal-close" onclick="closeModal('modal-chi')">&times;</div>
+            <span class="modal-title">Sample Size Calculator (from Text)</span>
+            <button class="modal-close" data-dismiss="sample-size-modal">&times;</button>
         </div>
         <div class="modal-body">
             <div class="form-group">
-                <label>Row Variable</label>
-                <select id="chi-var1" class="form-control var-selector" data-type="any"></select>
+                <label>Study description (paste Mean/SD text)</label>
+                <textarea class="form-control" id="ss-description" rows="6" placeholder="e.g., Control group: Mean = 5.2, SD = 1.3&#10;Experimental: Mean = 7.8, SD = 1.5&#10;&#10;Or: 5.2 +/- 1.3 vs 7.8 +/- 1.5"></textarea>
             </div>
-            <div class="form-group">
-                <label>Column Variable</label>
-                <select id="chi-var2" class="form-control var-selector" data-type="any"></select>
-            </div>
-        </div>
-        <div class="modal-footer">
-            <button class="btn btn-secondary" onclick="closeModal('modal-chi')">Cancel</button>
-            <button class="btn btn-primary" onclick="runChiSquare()">Run</button>
-        </div>
-    </div>
-</div>
-
-<!-- Regression -->
-<div class="modal-overlay" id="modal-regression">
-    <div class="modal">
-        <div class="modal-header">
-            <div class="modal-title">Regression Analysis</div>
-            <div class="modal-close" onclick="closeModal('modal-regression')">&times;</div>
-        </div>
-        <div class="modal-body">
-            <div class="form-group">
-                <label>Regression Type</label>
-                <select id="reg-type" class="form-control">
-                    <option value="ols">OLS Linear Regression</option>
-                    <option value="logistic">Logistic Regression</option>
-                    <option value="probit">Probit Regression</option>
-                </select>
-            </div>
-            <div class="form-group">
-                <label>Dependent Variable</label>
-                <select id="reg-depvar" class="form-control var-selector" data-type="numeric"></select>
-            </div>
-            <div class="form-group">
-                <label>Independent Variables (hold Ctrl to select multiple)</label>
-                <select id="reg-indepvars" class="form-control var-multi-selector" data-type="numeric" multiple size="6"></select>
-            </div>
-            <div class="form-group">
-                <label><input type="checkbox" id="reg-robust"> Robust standard errors (HC1)</label>
-            </div>
-        </div>
-        <div class="modal-footer">
-            <button class="btn btn-secondary" onclick="closeModal('modal-regression')">Cancel</button>
-            <button class="btn btn-primary" onclick="runRegression()">Run</button>
-        </div>
-    </div>
-</div>
-
-<!-- Correlation -->
-<div class="modal-overlay" id="modal-correlation">
-    <div class="modal">
-        <div class="modal-header">
-            <div class="modal-title">Correlation Matrix</div>
-            <div class="modal-close" onclick="closeModal('modal-correlation')">&times;</div>
-        </div>
-        <div class="modal-body">
-            <div class="form-group">
-                <label>Method</label>
-                <select id="corr-method" class="form-control">
-                    <option value="pearson">Pearson</option>
-                    <option value="spearman">Spearman</option>
-                </select>
-            </div>
-            <div class="form-group">
-                <label>Variables (hold Ctrl to select multiple)</label>
-                <select id="corr-vars" class="form-control var-multi-selector" data-type="numeric" multiple size="6"></select>
-            </div>
-        </div>
-        <div class="modal-footer">
-            <button class="btn btn-secondary" onclick="closeModal('modal-correlation')">Cancel</button>
-            <button class="btn btn-primary" onclick="runCorrelation()">Run</button>
-        </div>
-    </div>
-</div>
-
-<!-- Non-Parametric Tests -->
-<div class="modal-overlay" id="modal-nonparametric">
-    <div class="modal">
-        <div class="modal-header">
-            <div class="modal-title">Non-Parametric Tests</div>
-            <div class="modal-close" onclick="closeModal('modal-nonparametric')">&times;</div>
-        </div>
-        <div class="modal-body">
-            <div class="form-group">
-                <label>Test</label>
-                <select id="np-test" class="form-control" onchange="updateNPForm()">
-                    <option value="mann_whitney">Mann-Whitney U (Wilcoxon Rank-Sum)</option>
-                    <option value="wilcoxon">Wilcoxon Signed-Rank</option>
-                    <option value="kruskal_wallis">Kruskal-Wallis H</option>
-                </select>
-            </div>
-            <div id="np-group-fields">
+            <div class="form-row">
                 <div class="form-group">
-                    <label>Test Variable</label>
-                    <select id="np-var" class="form-control var-selector" data-type="numeric"></select>
-                </div>
-                <div class="form-group">
-                    <label>Group Variable</label>
-                    <select id="np-group" class="form-control var-selector" data-type="categorical"></select>
-                </div>
-            </div>
-            <div id="np-paired-fields" style="display:none">
-                <div class="form-group">
-                    <label>Variable 1</label>
-                    <select id="np-var1" class="form-control var-selector" data-type="numeric"></select>
-                </div>
-                <div class="form-group">
-                    <label>Variable 2</label>
-                    <select id="np-var2" class="form-control var-selector" data-type="numeric"></select>
-                </div>
-            </div>
-        </div>
-        <div class="modal-footer">
-            <button class="btn btn-secondary" onclick="closeModal('modal-nonparametric')">Cancel</button>
-            <button class="btn btn-primary" onclick="runNonParametric()">Run</button>
-        </div>
-    </div>
-</div>
-
-<!-- Survival Analysis -->
-<div class="modal-overlay" id="modal-survival">
-    <div class="modal">
-        <div class="modal-header">
-            <div class="modal-title">Survival Analysis</div>
-            <div class="modal-close" onclick="closeModal('modal-survival')">&times;</div>
-        </div>
-        <div class="modal-body">
-            <div class="form-group">
-                <label>Analysis Type</label>
-                <select id="surv-type" class="form-control" onchange="updateSurvForm()">
-                    <option value="kaplan_meier">Kaplan-Meier</option>
-                    <option value="cox">Cox Proportional Hazards</option>
-                </select>
-            </div>
-            <div class="form-group">
-                <label>Time Variable</label>
-                <select id="surv-time" class="form-control var-selector" data-type="numeric"></select>
-            </div>
-            <div class="form-group">
-                <label>Event Variable (1=event, 0=censored)</label>
-                <select id="surv-event" class="form-control var-selector" data-type="numeric"></select>
-            </div>
-            <div id="surv-km-fields">
-                <div class="form-group">
-                    <label>Group Variable (optional)</label>
-                    <select id="surv-group" class="form-control var-selector" data-type="any"></select>
-                </div>
-            </div>
-            <div id="surv-cox-fields" style="display:none">
-                <div class="form-group">
-                    <label>Covariates (hold Ctrl to select multiple)</label>
-                    <select id="surv-covariates" class="form-control var-multi-selector" data-type="numeric" multiple size="5"></select>
-                </div>
-            </div>
-        </div>
-        <div class="modal-footer">
-            <button class="btn btn-secondary" onclick="closeModal('modal-survival')">Cancel</button>
-            <button class="btn btn-primary" onclick="runSurvival()">Run</button>
-        </div>
-    </div>
-</div>
-
-<!-- Power Analysis -->
-<div class="modal-overlay" id="modal-power">
-    <div class="modal">
-        <div class="modal-header">
-            <div class="modal-title">Power Analysis</div>
-            <div class="modal-close" onclick="closeModal('modal-power')">&times;</div>
-        </div>
-        <div class="modal-body">
-            <div class="form-group">
-                <label>Test Type</label>
-                <select id="power-test" class="form-control">
-                    <option value="ttest">T-Test</option>
-                    <option value="anova">ANOVA</option>
-                    <option value="chi2">Chi-Square</option>
-                </select>
-            </div>
-            <div class="form-group">
-                <label>Sample Size per Group (leave blank to calculate)</label>
-                <input type="number" id="power-n" class="form-control" placeholder="n per group">
-            </div>
-            <div class="form-group">
-                <label>Effect Size (delta for t-test, f for ANOVA, w for chi2)</label>
-                <input type="number" id="power-delta" class="form-control" step="any" placeholder="e.g., 0.5">
-            </div>
-            <div class="form-group">
-                <label>Standard Deviation</label>
-                <input type="number" id="power-sd" class="form-control" value="1" step="any">
-            </div>
-            <div class="form-group">
-                <label>Alpha (Significance Level)</label>
-                <input type="number" id="power-alpha" class="form-control" value="0.05" step="0.01">
-            </div>
-            <div class="form-group">
-                <label>Power (leave blank to calculate)</label>
-                <input type="number" id="power-power" class="form-control" placeholder="e.g., 0.80" step="0.01">
-            </div>
-            <div class="form-group">
-                <label>Number of Groups (for ANOVA)</label>
-                <input type="number" id="power-k" class="form-control" value="2">
-            </div>
-        </div>
-        <div class="modal-footer">
-            <button class="btn btn-secondary" onclick="closeModal('modal-power')">Cancel</button>
-            <button class="btn btn-primary" onclick="runPower()">Calculate</button>
-        </div>
-    </div>
-</div>
-
-<!-- Sample Size Calculator -->
-<div class="modal-overlay" id="modal-samplesize">
-    <div class="modal">
-        <div class="modal-header">
-            <div class="modal-title">Sample Size Calculator (with Literature Search)</div>
-            <div class="modal-close" onclick="closeModal('modal-samplesize')">&times;</div>
-        </div>
-        <div class="modal-body">
-            <div class="form-group">
-                <label>Study Type</label>
-                <select id="ss-study" class="form-control">
-                    <option value="rct_two_arm">Randomized Controlled Trial (2-arm)</option>
-                    <option value="pilot_study">Pilot Study</option>
-                    <option value="cohort">Cohort Study</option>
-                    <option value="case_control">Case-Control</option>
-                    <option value="survey">Cross-Sectional Survey</option>
-                </select>
-            </div>
-            <div class="form-group">
-                <label>Statistical Test</label>
-                <select id="ss-test" class="form-control">
-                    <option value="t-test">T-Test (Compare Means)</option>
-                    <option value="anova">ANOVA (Multiple Groups)</option>
-                    <option value="chi-square">Chi-Square (Proportions)</option>
-                    <option value="proportion">Two Proportions</option>
-                </select>
-            </div>
-            <div class="form-group">
-                <label>Effect Size (Cohen's d/f/w)</label>
-                <input type="number" id="ss-effect" class="form-control" step="any" placeholder="e.g., 0.5 (medium)">
-            </div>
-            <div class="form-group">
-                <label>Standard Deviation (for means comparison)</label>
-                <input type="number" id="ss-sd" class="form-control" step="any" placeholder="e.g., 1.0">
-            </div>
-            <div class="form-group">
-                <label>Proportion 1 (for proportion tests)</label>
-                <input type="number" id="ss-p1" class="form-control" step="0.01" placeholder="e.g., 0.50">
-            </div>
-            <div class="form-group">
-                <label>Proportion 2 (for proportion tests)</label>
-                <input type="number" id="ss-p2" class="form-control" step="0.01" placeholder="e.g., 0.30">
-            </div>
-            <div class="form-group">
-                <label>Alpha</label>
-                <input type="number" id="ss-alpha" class="form-control" value="0.05" step="0.01">
-            </div>
-            <div class="form-group">
-                <label>Power</label>
-                <input type="number" id="ss-power" class="form-control" value="0.80" step="0.01">
-            </div>
-            <div class="form-group">
-                <label>Number of Groups</label>
-                <input type="number" id="ss-groups" class="form-control" value="2">
-            </div>
-        </div>
-        <div class="modal-footer">
-            <button class="btn btn-secondary" onclick="closeModal('modal-samplesize')">Cancel</button>
-            <button class="btn btn-primary" onclick="runSampleSize()">Calculate</button>
-        </div>
-    </div>
-</div>
-
-<!-- AI Proposal Analysis -->
-<div class="modal-overlay" id="modal-ai-proposal">
-    <div class="modal">
-        <div class="modal-header">
-            <div class="modal-title">AI Proposal Analysis</div>
-            <div class="modal-close" onclick="closeModal('modal-ai-proposal')">&times;</div>
-        </div>
-        <div class="modal-body">
-            <div class="form-group">
-                <label>Paste your research proposal or study description</label>
-                <textarea id="ai-proposal" class="form-control" rows="8" placeholder="Describe your study design, objectives, variables, hypotheses..."></textarea>
-            </div>
-            <p style="font-size:11px;color:var(--text-muted);margin-top:8px;">
-                The AI will analyze your proposal, search relevant literature, determine appropriate
-                statistical tests, and calculate required sample sizes.
-            </p>
-        </div>
-        <div class="modal-footer">
-            <button class="btn btn-secondary" onclick="closeModal('modal-ai-proposal')">Cancel</button>
-            <button class="btn btn-primary" onclick="closeModal('modal-ai-proposal');runAIAnalysis()">Analyze</button>
-        </div>
-    </div>
-</div>
-
-<!-- Literature Search -->
-<div class="modal-overlay" id="modal-ai-research">
-    <div class="modal">
-        <div class="modal-header">
-            <div class="modal-title">[#] Literature Search</div>
-            <div class="modal-close" onclick="closeModal('modal-ai-research')">[x]</div>
-        </div>
-        <div class="modal-body">
-            <div class="form-group">
-                <label>Search Query</label>
-                <input type="text" id="research-query" class="form-control" placeholder="e.g., sample size ANOVA dental hardness">
-            </div>
-            <p style="font-size:11px;color:var(--text-muted);margin-top:8px;">
-                &gt;&gt;&gt; Searches PubMed and CrossRef for relevant academic papers.
-            </p>
-        </div>
-        <div class="modal-footer">
-            <button class="btn btn-secondary" onclick="closeModal('modal-ai-research')">[Cancel]</button>
-            <button class="btn btn-primary" onclick="doLiteratureSearch()">[Search]</button>
-        </div>
-    </div>
-</div>
-
-<!-- Smart Statistical Router -->
-<div class="modal-overlay" id="modal-smart-analyze">
-    <div class="modal">
-        <div class="modal-header">
-            <div class="modal-title">[?] Smart Statistical Router</div>
-            <div class="modal-close" onclick="closeModal('modal-smart-analyze')">[x]</div>
-        </div>
-        <div class="modal-body">
-            <p style="font-size:11px;color:var(--text-muted);margin-bottom:12px;">
-                &gt;&gt;&gt; Auto-selects the appropriate test based on variable types and data structure.
-            </p>
-            <div class="form-group">
-                <label>Select Variables (hold Ctrl for multiple)</label>
-                <select id="smart-vars" class="form-control var-multi-selector" data-type="any" multiple size="8"></select>
-            </div>
-            <div class="form-group">
-                <label>Subject/ID Variable (for repeated measures)</label>
-                <select id="smart-subject" class="form-control var-selector" data-type="any">
-                    <option value="">-- None --</option>
-                </select>
-            </div>
-            <div class="form-group">
-                <label>Significance Level (alpha)</label>
-                <input type="number" id="smart-alpha" class="form-control" value="0.05" step="0.01">
-            </div>
-        </div>
-        <div class="modal-footer">
-            <button class="btn btn-secondary" onclick="closeModal('modal-smart-analyze')">[Cancel]</button>
-            <button class="btn btn-primary" onclick="runSmartAnalyze()">[Analyze]</button>
-        </div>
-    </div>
-</div>
-
-<!-- Sample Size from Text -->
-<div class="modal-overlay" id="modal-samplesize-text">
-    <div class="modal" style="max-width:600px;">
-        <div class="modal-header">
-            <div class="modal-title">[N] Sample Size Calculator (Text Parser)</div>
-            <div class="modal-close" onclick="closeModal('modal-samplesize-text')">[x]</div>
-        </div>
-        <div class="modal-body">
-            <p style="font-size:11px;color:var(--text-muted);margin-bottom:12px;">
-                &gt;&gt;&gt; Paste text from previous studies. The AI will extract Mean/SD values and calculate sample size.
-            </p>
-            <div class="form-group">
-                <label>Paste Text with Mean/SD Values</label>
-                <textarea id="ss-text" class="form-control" rows="8" placeholder="e.g., 'Control group: Mean = 5.2, SD = 1.3
-Experimental group: Mean = 7.8, SD = 1.5'
-
-Or: 'The control group showed M=5.2 (SD=1.3) while treatment showed M=7.8 (SD=1.5)'
-
-Or: '5.2 +/- 1.3 vs 7.8 +/- 1.5'"></textarea>
-            </div>
-            <div class="form-group" style="display:flex;gap:12px;">
-                <div style="flex:1;">
                     <label>Alpha</label>
-                    <input type="number" id="ss-text-alpha" class="form-control" value="0.05" step="0.01">
+                    <input class="form-control" type="number" id="ss-alpha" value="0.05" step="0.01" min="0.001" max="0.5">
                 </div>
-                <div style="flex:1;">
-                    <label>Power</label>
-                    <input type="number" id="ss-text-power" class="form-control" value="0.80" step="0.01">
-                </div>
-            </div>
-        </div>
-        <div class="modal-footer">
-            <button class="btn btn-secondary" onclick="closeModal('modal-samplesize-text')">[Cancel]</button>
-            <button class="btn btn-primary" onclick="runSampleSizeFromText()">[Calculate]</button>
-        </div>
-    </div>
-</div>
-
-<!-- Proposal Upload (RAG Context) -->
-<div class="modal-overlay" id="modal-proposal-upload">
-    <div class="modal" style="max-width:600px;">
-        <div class="modal-header">
-            <div class="modal-title">[+] Upload Research Proposal</div>
-            <div class="modal-close" onclick="closeModal('modal-proposal-upload')">[x]</div>
-        </div>
-        <div class="modal-body">
-            <p style="font-size:11px;color:var(--text-muted);margin-bottom:12px;">
-                &gt;&gt;&gt; Upload or paste your research proposal. The AI will use it as context for analysis.
-            </p>
-            <div class="form-group">
-                <label>Paste Research Proposal Text</label>
-                <textarea id="proposal-text" class="form-control" rows="10" placeholder="Paste your research proposal, methodology section, or study description here..."></textarea>
-            </div>
-        </div>
-        <div class="modal-footer">
-            <button class="btn btn-secondary" onclick="closeModal('modal-proposal-upload')">[Cancel]</button>
-            <button class="btn btn-secondary" onclick="checkProposalReferences()">[Check References]</button>
-            <button class="btn btn-primary" onclick="uploadProposal()">[Store Context]</button>
-        </div>
-    </div>
-</div>
-
-<!-- Universal Statistical Analysis Agent (3-Stage Pipeline) -->
-<div class="modal-overlay" id="modal-universal-analyze">
-    <div class="modal" style="max-width:750px;">
-        <div class="modal-header">
-            <div class="modal-title">[*] Universal Statistical Analysis Agent</div>
-            <div class="modal-close" onclick="closeModal('modal-universal-analyze')">[x]</div>
-        </div>
-        <div class="modal-body">
-            <!-- 3-Stage Pipeline Description -->
-            <div class="pipeline-info" style="background:var(--bg-tertiary);padding:12px;border-radius:4px;margin-bottom:16px;border-left:3px solid var(--accent-cyan);">
-                <div style="font-size:12px;font-weight:bold;color:var(--accent-cyan);margin-bottom:8px;">3-STAGE PIPELINE ARCHITECTURE</div>
-                <div style="font-size:11px;color:var(--text-muted);line-height:1.6;">
-                    <strong style="color:var(--accent-yellow);">Stage 1:</strong> AI Data Organizer - Extracts clean JSON from ANY Excel layout<br>
-                    <strong style="color:var(--accent-green);">Stage 2:</strong> Python Calculator - ANOVA + Tukey + Power Analysis (no AI guessing)<br>
-                    <strong style="color:var(--accent-cyan);">Stage 3:</strong> AI Reporter - Context-aware interpretation of proven statistics
-                </div>
-                <div style="font-size:10px;color:var(--text-muted);margin-top:8px;font-style:italic;">
-                    "The AI organizes the mess. The Code calculates the truth. The AI explains the result."
-                </div>
-            </div>
-
-            <!-- Drag & Drop Zone -->
-            <div id="universal-drop-zone" class="drop-zone"
-                 ondragover="handleDragOver(event)"
-                 ondragleave="handleDragLeave(event)"
-                 ondrop="handleFileDrop(event)">
-                <div class="drop-zone-content">
-                    <span style="font-size:24px;margin-bottom:8px;">[+]</span>
-                    <span>Drag & Drop Excel/CSV file here</span>
-                    <span style="font-size:10px;margin-top:4px;">or click to browse</span>
-                </div>
-                <input type="file" id="universal-file-input" accept=".csv,.xlsx,.xls"
-                       onchange="handleFileSelect(event)" style="display:none;">
-            </div>
-
-            <!-- OR Paste Data -->
-            <div style="text-align:center;margin:12px 0;color:var(--text-muted);font-size:11px;">
-                --- OR paste data directly ---
-            </div>
-
-            <div class="form-group">
-                <label>Paste Raw Data (any layout)</label>
-                <textarea id="universal-data-text" class="form-control" rows="8" placeholder="Paste data from Excel/CSV...
-
-Example formats (AI will understand ANY layout):
-Group A: 5.2, 5.4, 5.1, 5.3
-Group B: 7.2, 7.0, 7.4, 7.1
-
-OR
-
-Control  Treatment1  Treatment2
-5.2      6.1         7.2
-5.4      6.3         7.0
-5.1      5.9         7.4"></textarea>
-            </div>
-
-            <!-- Test Type Selection -->
-            <div class="form-group" style="display:flex;gap:12px;align-items:flex-end;">
-                <div style="flex:2;">
-                    <label>Test Type (auto-detected from headers)</label>
-                    <select id="universal-test-type" class="form-control">
-                        <option value="">Auto-detect from data</option>
-                        <option value="higher">Higher = Better (Hardness, Bond Strength)</option>
-                        <option value="lower">Lower = Better (Biofilm, Roughness)</option>
-                    </select>
-                </div>
-                <div style="flex:1;">
-                    <label>Significance</label>
-                    <input type="number" id="universal-alpha" class="form-control" value="0.05" step="0.01">
-                </div>
-            </div>
-
-            <!-- Proposal Context -->
-            <div class="form-group">
-                <label>Research Context (optional - helps interpretation)</label>
-                <input type="text" id="universal-context" class="form-control"
-                       placeholder="e.g., Microhardness of dental composites after soy milk immersion">
-            </div>
-
-            <!-- File Status -->
-            <div id="universal-file-status" style="display:none;padding:8px;background:var(--bg-tertiary);border-radius:4px;margin-top:8px;">
-                <span id="universal-file-name"></span>
-                <button onclick="clearUniversalFile()" style="float:right;background:none;border:none;color:var(--text-muted);cursor:pointer;">[x]</button>
-            </div>
-
-            <!-- Progress Stepper (hidden by default, shown during analysis) -->
-            <div id="universal-progress-stepper" style="display:none;margin-top:16px;padding:16px;background:var(--bg-tertiary);border-radius:4px;">
-                <div style="font-size:11px;color:var(--text-muted);margin-bottom:12px;text-align:center;">ANALYSIS PROGRESS</div>
-                <div style="display:flex;justify-content:space-between;align-items:center;">
-                    <!-- Stage 1 -->
-                    <div class="progress-stage" id="stage-1" style="flex:1;text-align:center;">
-                        <div class="stage-icon" id="stage-1-icon" style="font-size:20px;margin-bottom:4px;">[~]</div>
-                        <div class="stage-label" style="font-size:10px;">AI Organizer</div>
-                        <div class="stage-status" id="stage-1-status" style="font-size:9px;color:var(--text-muted);">Waiting</div>
-                    </div>
-                    <div style="flex:0.5;text-align:center;color:var(--text-muted);">→</div>
-                    <!-- Stage 2 -->
-                    <div class="progress-stage" id="stage-2" style="flex:1;text-align:center;">
-                        <div class="stage-icon" id="stage-2-icon" style="font-size:20px;margin-bottom:4px;">[%]</div>
-                        <div class="stage-label" style="font-size:10px;">Calculator</div>
-                        <div class="stage-status" id="stage-2-status" style="font-size:9px;color:var(--text-muted);">Waiting</div>
-                    </div>
-                    <div style="flex:0.5;text-align:center;color:var(--text-muted);">→</div>
-                    <!-- Stage 3 -->
-                    <div class="progress-stage" id="stage-3" style="flex:1;text-align:center;">
-                        <div class="stage-icon" id="stage-3-icon" style="font-size:20px;margin-bottom:4px;">[#]</div>
-                        <div class="stage-label" style="font-size:10px;">AI Reporter</div>
-                        <div class="stage-status" id="stage-3-status" style="font-size:9px;color:var(--text-muted);">Waiting</div>
-                    </div>
-                </div>
-            </div>
-        </div>
-        <div class="modal-footer">
-            <button class="btn btn-secondary" onclick="closeModal('modal-universal-analyze')">[Cancel]</button>
-            <button class="btn btn-primary" id="universal-analyze-btn" onclick="runUniversalAnalysis()">[Analyze]</button>
-        </div>
-    </div>
-</div>
-
-<!-- Messy Data Analysis Agent -->
-<div class="modal-overlay" id="modal-messy-data">
-    <div class="modal" style="max-width:700px;">
-        <div class="modal-header">
-            <div class="modal-title">[AGENT] Messy Data Analysis</div>
-            <div class="modal-close" onclick="closeModal('modal-messy-data')">[x]</div>
-        </div>
-        <div class="modal-body">
-            <p style="font-size:11px;color:var(--text-muted);margin-bottom:12px;">
-                >>> Paste messy spreadsheet data. The AI will:<br>
-                1) Extract structure (groups, time points)<br>
-                2) Run Python ANOVA + Tukey post-hoc<br>
-                3) Interpret the results
-            </p>
-            <div class="form-group">
-                <label>Paste Raw Data (from Excel/CSV)</label>
-                <textarea id="messy-data-text" class="form-control" rows="10" placeholder="Paste your messy data here...
-
-Example:
-Group A - T0: 5.2, 5.4, 5.1, 5.3
-Group A - T1: 6.1, 6.3, 5.9, 6.0
-Group B - T0: 5.0, 5.2, 5.1, 4.9
-Group B - T1: 7.2, 7.0, 7.4, 7.1"></textarea>
-            </div>
-            <div class="form-group">
-                <label>Context (optional - e.g., what the groups/timepoints represent)</label>
-                <input type="text" id="messy-data-context" class="form-control" placeholder="e.g., Microhardness values of dental composites">
-            </div>
-        </div>
-        <div class="modal-footer">
-            <button class="btn btn-secondary" onclick="closeModal('modal-messy-data')">[Cancel]</button>
-            <button class="btn btn-primary" onclick="runMessyDataAnalysis()">[Analyze]</button>
-        </div>
-    </div>
-</div>
-
-<!-- Dual-Mode Sample Size Calculator -->
-<div class="modal-overlay" id="modal-sample-size-dual">
-    <div class="modal" style="max-width:650px;">
-        <div class="modal-header">
-            <div class="modal-title">[AGENT] Sample Size Calculator</div>
-            <div class="modal-close" onclick="closeModal('modal-sample-size-dual')">[x]</div>
-        </div>
-        <div class="modal-body">
-            <div style="display:flex;gap:8px;margin-bottom:16px;">
-                <button class="btn btn-primary" id="ss-dual-ai-btn" onclick="switchSampleSizeMode('ai')" style="flex:1;">AI-Powered</button>
-                <button class="btn btn-secondary" id="ss-dual-manual-btn" onclick="switchSampleSizeMode('manual')" style="flex:1;">Manual</button>
-            </div>
-
-            <!-- AI Mode -->
-            <div id="ss-dual-ai-mode">
-                <p style="font-size:11px;color:var(--text-muted);margin-bottom:12px;">
-                    >>> Enter your research topic. The AI will search for similar studies,<br>
-                    extract Mean/SD values, calculate effect size, and recommend sample size.
-                </p>
                 <div class="form-group">
-                    <label>Research Topic</label>
-                    <input type="text" id="ss-dual-topic" class="form-control" placeholder="e.g., microhardness of dental composites after soy milk immersion">
-                </div>
-            </div>
-
-            <!-- Manual Mode -->
-            <div id="ss-dual-manual-mode" style="display:none;">
-                <p style="font-size:11px;color:var(--text-muted);margin-bottom:12px;">
-                    >>> Enter your parameters directly for sample size calculation.
-                </p>
-                <div class="form-group" style="display:flex;gap:12px;">
-                    <div style="flex:1;">
-                        <label>Effect Size (Cohen's d)</label>
-                        <input type="number" id="ss-dual-effect" class="form-control" value="0.5" step="0.1" placeholder="0.5 = medium">
-                    </div>
-                    <div style="flex:1;">
-                        <label>Test Type</label>
-                        <select id="ss-dual-test" class="form-control">
-                            <option value="t-test">T-Test</option>
-                            <option value="anova">ANOVA</option>
-                        </select>
-                    </div>
-                </div>
-                <div class="form-group" style="display:flex;gap:12px;">
-                    <div style="flex:1;">
-                        <label>Alpha</label>
-                        <input type="number" id="ss-dual-alpha" class="form-control" value="0.05" step="0.01">
-                    </div>
-                    <div style="flex:1;">
-                        <label>Power</label>
-                        <input type="number" id="ss-dual-power" class="form-control" value="0.80" step="0.05">
-                    </div>
+                    <label>Power</label>
+                    <input class="form-control" type="number" id="ss-power" value="0.80" step="0.05" min="0.5" max="0.99">
                 </div>
             </div>
         </div>
         <div class="modal-footer">
-            <button class="btn btn-secondary" onclick="closeModal('modal-sample-size-dual')">[Cancel]</button>
-            <button class="btn btn-primary" onclick="runDualSampleSize()">[Calculate]</button>
+            <button class="btn btn-secondary" data-dismiss="sample-size-modal">Cancel</button>
+            <button class="btn btn-primary" id="ss-run-btn">Calculate</button>
         </div>
     </div>
 </div>
 
-<!-- Literature Review Agent -->
-<div class="modal-overlay" id="modal-lit-review">
-    <div class="modal" style="max-width:650px;">
+<!-- Messy Data Modal -->
+<div class="modal-overlay" id="messy-modal">
+    <div class="modal">
         <div class="modal-header">
-            <div class="modal-title">[AGENT] Literature Review Generator</div>
-            <div class="modal-close" onclick="closeModal('modal-lit-review')">[x]</div>
+            <span class="modal-title">Messy Data Analysis</span>
+            <button class="modal-close" data-dismiss="messy-modal">&times;</button>
         </div>
         <div class="modal-body">
-            <p style="font-size:11px;color:var(--text-muted);margin-bottom:12px;">
-                >>> Enter your research topic. The AI will:<br>
-                1) Search academic databases (PubMed, CrossRef)<br>
-                2) Synthesize findings into a literature review<br>
-                3) Provide numbered citations
-            </p>
+            <div class="form-hint mb-3">Data must be loaded first. The AI agent will clean and analyze your loaded data.</div>
             <div class="form-group">
-                <label>Research Topic</label>
-                <input type="text" id="lit-review-topic" class="form-control" placeholder="e.g., effect of bleaching agents on enamel microhardness">
-            </div>
-            <div class="form-group">
-                <label>Additional Context (optional)</label>
-                <textarea id="lit-review-context" class="form-control" rows="3" placeholder="e.g., focus on in-vitro studies, last 5 years..."></textarea>
+                <label>Description of what to look for (optional)</label>
+                <textarea class="form-control" id="messy-description" rows="3" placeholder="e.g., Compare hardness values between groups across time points"></textarea>
             </div>
         </div>
         <div class="modal-footer">
-            <button class="btn btn-secondary" onclick="closeModal('modal-lit-review')">[Cancel]</button>
-            <button class="btn btn-primary" onclick="runLiteratureReview()">[Generate Review]</button>
+            <button class="btn btn-secondary" data-dismiss="messy-modal">Cancel</button>
+            <button class="btn btn-primary" id="messy-run-btn">Analyze</button>
         </div>
     </div>
 </div>
 
-<script src="/static/js/app.js"></script>
-<script>
-// Dynamic form updates
-function updateTTestForm() {
-    const type = document.getElementById("ttest-type").value;
-    document.getElementById("ttest-twosample-fields").style.display = type === "two_sample" ? "" : "none";
-    document.getElementById("ttest-onesample-fields").style.display = type === "one_sample" ? "" : "none";
-    document.getElementById("ttest-paired-fields").style.display = type === "paired" ? "" : "none";
-}
+<!-- Literature Review Modal -->
+<div class="modal-overlay" id="lit-modal">
+    <div class="modal">
+        <div class="modal-header">
+            <span class="modal-title">Literature Review</span>
+            <button class="modal-close" data-dismiss="lit-modal">&times;</button>
+        </div>
+        <div class="modal-body">
+            <div class="form-group">
+                <label>Search query</label>
+                <input class="form-control" type="text" id="lit-query" placeholder="e.g., dental composite microhardness soy milk">
+            </div>
+            <div class="form-group">
+                <label>Max results</label>
+                <input class="form-control" type="number" id="lit-max" value="5" min="1" max="20">
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button class="btn btn-secondary" data-dismiss="lit-modal">Cancel</button>
+            <button class="btn btn-primary" id="lit-run-btn">Search</button>
+        </div>
+    </div>
+</div>
 
-function updateAnovaForm() {
-    const type = document.getElementById("anova-type").value;
-    document.getElementById("anova-oneway-fields").style.display = type === "oneway" ? "" : "none";
-    document.getElementById("anova-twoway-fields").style.display = type === "twoway" ? "" : "none";
-}
+<!-- ============================================================
+     TOAST CONTAINER
+     ============================================================ -->
+<div id="toast-container"></div>
 
-function updateNPForm() {
-    const test = document.getElementById("np-test").value;
-    document.getElementById("np-group-fields").style.display = test !== "wilcoxon" ? "" : "none";
-    document.getElementById("np-paired-fields").style.display = test === "wilcoxon" ? "" : "none";
-}
-
-function updateSurvForm() {
-    const type = document.getElementById("surv-type").value;
-    document.getElementById("surv-km-fields").style.display = type === "kaplan_meier" ? "" : "none";
-    document.getElementById("surv-cox-fields").style.display = type === "cox" ? "" : "none";
-}
-
-async function doLiteratureSearch() {
-    const query = document.getElementById("research-query").value;
-    if (!query) { showToast("Enter a search query", "error"); return; }
-    closeModal("modal-ai-research");
-    switchTab("output");
-    appendOutput("command", `ai research "${query}"`, "Searching...");
-
-    try {
-        const resp = await fetch("/api/ai/research", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ query }),
-        });
-        const data = await resp.json();
-        let output = `Literature Search: "${query}"\n${"=".repeat(50)}\n`;
-        (data.results || []).forEach((r, i) => {
-            if (!r.error) {
-                output += `\n[${i+1}] ${r.title || "N/A"}`;
-                output += `\n    Authors: ${r.authors || "N/A"}`;
-                output += `\n    Journal: ${r.journal || "N/A"} (${r.year || "N/A"})`;
-                output += `\n    Source: ${r.source}${r.doi ? " | DOI: " + r.doi : ""}${r.pmid ? " | PMID: " + r.pmid : ""}\n`;
-            }
-        });
-        updateLastOutput(`ai research "${query}"`, output);
-    } catch (err) {
-        updateLastOutput(`ai research`, `Error: ${err.message}`, "error");
-    }
-}
-</script>
+<!-- ============================================================
+     SCRIPTS
+     ============================================================ -->
+<script src="{{ url_for('static', filename='js/app.js') }}"></script>
 
 </body>
 </html>
