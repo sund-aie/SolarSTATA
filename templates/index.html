@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SolarSTATA</title>
+    <title>$TATA - Statistical Analysis</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/stata.css') }}">
 </head>
 <body>
@@ -12,9 +12,8 @@
      TOP TOOLBAR
      ============================================================ -->
 <header id="toolbar">
-    <div class="app-logo">
-        <div class="app-logo-icon">S</div>
-        <span class="app-logo-text">Solar<span>STATA</span></span>
+    <div class="app-logo pixel-logo">
+        <span class="logo-dollar">$</span><span class="logo-tata">TATA</span>
     </div>
 
     <div class="toolbar-separator"></div>
@@ -26,11 +25,12 @@
     <div class="toolbar-separator"></div>
 
     <div class="model-selector">
-        <label for="model-select">Model:</label>
+        <label for="model-select">AI:</label>
         <select id="model-select"></select>
         <span id="ollama-status" class="status-dot connecting" title="Checking Ollama..."></span>
     </div>
 
+    <button class="toolbar-btn" id="btn-chat" title="Open AI Chat">Chat</button>
     <button class="toolbar-btn toolbar-btn-help" id="btn-help" title="Help">?</button>
 </header>
 
@@ -71,6 +71,7 @@
             <div class="tab active" data-tab="output">Output</div>
             <div class="tab" data-tab="data">Data</div>
             <div class="tab" data-tab="graph">Graph</div>
+            <div class="tab" data-tab="chat">AI Chat</div>
         </nav>
 
         <!-- Tab: Output -->
@@ -98,6 +99,22 @@
             </div>
         </div>
 
+        <!-- Tab: AI Chat -->
+        <div id="tab-chat" class="tab-content">
+            <div id="chat-container">
+                <div id="chat-messages">
+                    <div class="chat-welcome">
+                        <div class="chat-welcome-title">AI Assistant</div>
+                        <div class="chat-welcome-desc">Ask questions about your data, results, or statistical methods. I can explain analyses, suggest tests, and help interpret findings.</div>
+                    </div>
+                </div>
+                <div id="chat-input-area">
+                    <textarea id="chat-input" placeholder="Ask about your data or results..." rows="2"></textarea>
+                    <button class="btn btn-primary" id="chat-send">Send</button>
+                </div>
+            </div>
+        </div>
+
         <!-- Command Bar -->
         <div id="command-bar">
             <span class="prompt">.</span>
@@ -120,76 +137,76 @@
             <div class="prop-section">
                 <div class="prop-section-title">Descriptive</div>
                 <div class="d-flex flex-wrap gap-1">
-                    <button class="btn btn-outline btn-sm" data-test="descriptive">Describe</button>
-                    <button class="btn btn-outline btn-sm" data-test="tabulate">Tabulate</button>
-                    <button class="btn btn-outline btn-sm" data-test="normality">Normality</button>
+                    <button class="btn btn-outline btn-sm" data-test="descriptive" data-help="Calculates mean, SD, min, max, and percentiles. Use for summarizing continuous variables.">Describe</button>
+                    <button class="btn btn-outline btn-sm" data-test="tabulate" data-help="Creates frequency tables for categorical variables. Shows counts and percentages.">Tabulate</button>
+                    <button class="btn btn-outline btn-sm" data-test="normality" data-help="Shapiro-Wilk test checks if data follows normal distribution. p>0.05 suggests normality.">Normality</button>
                 </div>
             </div>
             <div class="prop-section">
                 <div class="prop-section-title">T-Tests</div>
                 <div class="d-flex flex-wrap gap-1">
-                    <button class="btn btn-outline btn-sm" data-test="ttest_one">One-Sample</button>
-                    <button class="btn btn-outline btn-sm" data-test="ttest_two">Two-Sample</button>
-                    <button class="btn btn-outline btn-sm" data-test="ttest_paired">Paired</button>
+                    <button class="btn btn-outline btn-sm" data-test="ttest_one" data-help="Compare sample mean to a known value. Example: Is average hardness different from 50?">One-Sample</button>
+                    <button class="btn btn-outline btn-sm" data-test="ttest_two" data-help="Compare means of two independent groups. Example: Control vs Treatment group.">Two-Sample</button>
+                    <button class="btn btn-outline btn-sm" data-test="ttest_paired" data-help="Compare means of paired observations. Example: Before vs After treatment on same subjects.">Paired</button>
                 </div>
             </div>
             <div class="prop-section">
                 <div class="prop-section-title">ANOVA</div>
                 <div class="d-flex flex-wrap gap-1">
-                    <button class="btn btn-outline btn-sm" data-test="anova_oneway">One-Way</button>
-                    <button class="btn btn-outline btn-sm" data-test="anova_twoway">Two-Way</button>
+                    <button class="btn btn-outline btn-sm" data-test="anova_oneway" data-help="Compare means across 3+ groups. Example: Compare hardness across 4 different materials.">One-Way</button>
+                    <button class="btn btn-outline btn-sm" data-test="anova_twoway" data-help="Test effects of two factors and their interaction. Example: Material type AND immersion time.">Two-Way</button>
                 </div>
             </div>
             <div class="prop-section">
                 <div class="prop-section-title">Categorical</div>
                 <div class="d-flex flex-wrap gap-1">
-                    <button class="btn btn-outline btn-sm" data-test="chi_square">Chi-Square</button>
-                    <button class="btn btn-outline btn-sm" data-test="fisher">Fisher</button>
+                    <button class="btn btn-outline btn-sm" data-test="chi_square" data-help="Test association between two categorical variables. Use when expected counts >= 5.">Chi-Square</button>
+                    <button class="btn btn-outline btn-sm" data-test="fisher" data-help="Exact test for 2x2 tables with small samples. Use when expected counts < 5.">Fisher</button>
                 </div>
             </div>
             <div class="prop-section">
                 <div class="prop-section-title">Regression</div>
                 <div class="d-flex flex-wrap gap-1">
-                    <button class="btn btn-outline btn-sm" data-test="regression">OLS</button>
-                    <button class="btn btn-outline btn-sm" data-test="logistic">Logistic</button>
-                    <button class="btn btn-outline btn-sm" data-test="probit">Probit</button>
+                    <button class="btn btn-outline btn-sm" data-test="regression" data-help="Predict continuous outcome from predictors. Shows coefficients, R-squared, and p-values.">OLS</button>
+                    <button class="btn btn-outline btn-sm" data-test="logistic" data-help="Predict binary outcome (0/1). Reports odds ratios. Example: Predict success/failure.">Logistic</button>
+                    <button class="btn btn-outline btn-sm" data-test="probit" data-help="Alternative to logistic for binary outcomes. Uses cumulative normal distribution.">Probit</button>
                 </div>
             </div>
             <div class="prop-section">
                 <div class="prop-section-title">Non-Parametric</div>
                 <div class="d-flex flex-wrap gap-1">
-                    <button class="btn btn-outline btn-sm" data-test="mann_whitney">Mann-Whitney</button>
-                    <button class="btn btn-outline btn-sm" data-test="wilcoxon">Wilcoxon</button>
-                    <button class="btn btn-outline btn-sm" data-test="kruskal_wallis">Kruskal-Wallis</button>
+                    <button class="btn btn-outline btn-sm" data-test="mann_whitney" data-help="Compare two groups when data isn't normal. Alternative to independent t-test.">Mann-Whitney</button>
+                    <button class="btn btn-outline btn-sm" data-test="wilcoxon" data-help="Compare paired data when differences aren't normal. Alternative to paired t-test.">Wilcoxon</button>
+                    <button class="btn btn-outline btn-sm" data-test="kruskal_wallis" data-help="Compare 3+ groups when data isn't normal. Alternative to one-way ANOVA.">Kruskal-Wallis</button>
                 </div>
             </div>
             <div class="prop-section">
                 <div class="prop-section-title">Correlation &amp; Post-Hoc</div>
                 <div class="d-flex flex-wrap gap-1">
-                    <button class="btn btn-outline btn-sm" data-test="correlation">Correlation</button>
-                    <button class="btn btn-outline btn-sm" data-test="tukey">Tukey HSD</button>
-                    <button class="btn btn-outline btn-sm" data-test="bonferroni">Bonferroni</button>
+                    <button class="btn btn-outline btn-sm" data-test="correlation" data-help="Measure linear relationship between variables. Pearson (normal) or Spearman (ranked).">Correlation</button>
+                    <button class="btn btn-outline btn-sm" data-test="tukey" data-help="After significant ANOVA, find which specific groups differ. Controls family-wise error.">Tukey HSD</button>
+                    <button class="btn btn-outline btn-sm" data-test="bonferroni" data-help="Conservative post-hoc test. Adjusts p-values for multiple comparisons.">Bonferroni</button>
                 </div>
             </div>
             <div class="prop-section">
                 <div class="prop-section-title">Repeated Measures</div>
                 <div class="d-flex flex-wrap gap-1">
-                    <button class="btn btn-outline btn-sm" data-test="rm_anova">RM-ANOVA</button>
-                    <button class="btn btn-outline btn-sm" data-test="friedman">Friedman</button>
+                    <button class="btn btn-outline btn-sm" data-test="rm_anova" data-help="Compare means across time points for same subjects. Example: Day 1, Day 7, Day 14.">RM-ANOVA</button>
+                    <button class="btn btn-outline btn-sm" data-test="friedman" data-help="Non-parametric alternative for repeated measures when data isn't normal.">Friedman</button>
                 </div>
             </div>
             <div class="prop-section">
                 <div class="prop-section-title">Survival</div>
                 <div class="d-flex flex-wrap gap-1">
-                    <button class="btn btn-outline btn-sm" data-test="kaplan_meier">Kaplan-Meier</button>
-                    <button class="btn btn-outline btn-sm" data-test="cox">Cox PH</button>
+                    <button class="btn btn-outline btn-sm" data-test="kaplan_meier" data-help="Estimate survival probabilities over time. Compares survival curves between groups.">Kaplan-Meier</button>
+                    <button class="btn btn-outline btn-sm" data-test="cox" data-help="Assess effect of covariates on survival. Reports hazard ratios.">Cox PH</button>
                 </div>
             </div>
             <div class="prop-section">
                 <div class="prop-section-title">Power &amp; Sample Size</div>
                 <div class="d-flex flex-wrap gap-1">
-                    <button class="btn btn-outline btn-sm" data-test="power">Power</button>
-                    <button class="btn btn-outline btn-sm" data-test="sample_size">Sample Size</button>
+                    <button class="btn btn-outline btn-sm" data-test="power" data-help="Calculate probability of detecting an effect given sample size and effect size.">Power</button>
+                    <button class="btn btn-outline btn-sm" data-test="sample_size" data-help="Calculate required sample size to achieve desired power (typically 80%).">Sample Size</button>
                 </div>
             </div>
         </div>
@@ -199,11 +216,11 @@
             <div class="prop-section">
                 <div class="prop-section-title">3-Stage Pipeline</div>
                 <button class="btn btn-primary btn-sm" id="btn-universal" style="width:100%; margin-bottom:8px;">Universal Analysis</button>
+                <div class="text-sm text-muted">AI organizes data, Python computes, AI reports results.</div>
             </div>
             <div class="prop-section">
                 <div class="prop-section-title">AI Features</div>
                 <div class="d-flex flex-column gap-2">
-                    <button class="btn btn-outline btn-sm" id="btn-ai-analyze">AI Analyze</button>
                     <button class="btn btn-outline btn-sm" id="btn-messy-data">Messy Data</button>
                     <button class="btn btn-outline btn-sm" id="btn-sample-size-text">Sample Size (Text)</button>
                     <button class="btn btn-outline btn-sm" id="btn-lit-review">Literature Review</button>
@@ -225,9 +242,12 @@
             <span id="status-message">Ready</span>
         </div>
     </div>
+    <div class="status-center">
+        <span class="braille-copyright" title="All Rights Reserved for SunDie">⠁⠇⠇ ⠗⠊⠛⠓⠞⠎ ⠗⠑⠎⠑⠗⠧⠑⠙ ⠋⠕⠗ ⠎⠥⠝⠙⠊⠑</span>
+    </div>
     <div class="status-right">
         <span class="status-item" id="status-data">No data</span>
-        <span class="status-item">SolarSTATA v2.0</span>
+        <span class="status-item">$TATA v2.0</span>
     </div>
 </footer>
 
@@ -338,34 +358,6 @@
         <div class="modal-footer">
             <button class="btn btn-secondary" data-dismiss="universal-modal">Cancel</button>
             <button class="btn btn-primary" id="universal-run-btn">Analyze</button>
-        </div>
-    </div>
-</div>
-
-<!-- AI Analysis Modal -->
-<div class="modal-overlay" id="ai-modal">
-    <div class="modal">
-        <div class="modal-header">
-            <span class="modal-title">AI Analysis</span>
-            <button class="modal-close" data-dismiss="ai-modal">&times;</button>
-        </div>
-        <div class="modal-body">
-            <div class="form-group">
-                <label>Proposal text</label>
-                <textarea class="form-control" id="ai-proposal-text" rows="5" placeholder="Paste your research proposal or study description..."></textarea>
-            </div>
-            <div class="form-group">
-                <label>Question</label>
-                <textarea class="form-control" id="ai-question" rows="3" placeholder="What would you like the AI to analyze?"></textarea>
-            </div>
-            <div class="form-check">
-                <input type="checkbox" id="ai-lit-search" checked>
-                <label for="ai-lit-search">Include literature search</label>
-            </div>
-        </div>
-        <div class="modal-footer">
-            <button class="btn btn-secondary" data-dismiss="ai-modal">Cancel</button>
-            <button class="btn btn-primary" id="ai-run-btn">Analyze</button>
         </div>
     </div>
 </div>

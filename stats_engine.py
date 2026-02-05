@@ -173,7 +173,9 @@ def twoway_anova(df, depvar, factor1, factor2, interaction=True):
     formula = f"{depvar} ~ C({factor1})" + (f" * C({factor2})" if interaction else f" + C({factor2})")
     model = smf_ols(formula, data=tmp).fit()
     aov = anova_lm(model, typ=2)
-    return dict(anova_table=aov.to_dict(), anova_str=aov.to_string(),
+    # Clean NaN from string representations
+    aov_str = aov.fillna("").to_string()
+    return dict(anova_table=aov.to_dict(), anova_str=aov_str,
                 r2=_R(model.rsquared), adj_r2=_R(model.rsquared_adj),
                 summary=model.summary().as_text())
 
