@@ -624,6 +624,138 @@ def agent_proposal():
         return _err(str(e))
 
 
+@app.route("/api/agent/chat", methods=["POST"])
+def agent_chat():
+    """AI Chat endpoint - provides conversational help about data and statistics."""
+    d = request.json or {}
+    message = d.get("message", "")
+    context = d.get("context", "")
+    history = d.get("history", [])
+    if not message.strip():
+        return _err("No message provided")
+    try:
+        ac = _agent()
+        # Build a prompt for the AI
+        prompt = f"""You are a helpful statistical analysis assistant for $TATA (a Stata-like app).
+The user is asking about their data or statistical analysis.
+
+Context about their loaded data:
+{context}
+
+User question: {message}
+
+Please provide a clear, helpful answer. If they ask about statistical tests, explain:
+- When to use the test
+- What assumptions it requires
+- How to interpret results
+- Stata-style commands if applicable
+
+Keep responses concise but informative."""
+
+        # Use the agent's call_agent function
+        if ac.is_ollama_available():
+            response = ac.call_agent(prompt)
+        else:
+            # Fallback: provide a helpful static response
+            response = _chat_fallback(message, context)
+
+        return jsonify({"response": response})
+    except Exception as e:
+        return jsonify({"response": f"I encountered an error: {str(e)}. Please try rephrasing your question."})
+
+
+def _chat_fallback(message, context):
+    """Provide helpful responses when Ollama is not available."""
+    msg = message.lower()
+
+    # Test explanations
+    if "t-test" in msg or "ttest" in msg:
+        return """**T-Test Overview**
+
+The t-test compares means between groups:
+
+- **One-sample t-test**: Compare sample mean to a known value
+  - Stata: `ttest varname == value`
+
+- **Two-sample t-test**: Compare means of two independent groups
+  - Stata: `ttest varname, by(groupvar)`
+  - Assumes: normal distribution, equal variances (use Welch's if not)
+
+- **Paired t-test**: Compare paired observations (before/after)
+  - Stata: `ttest var1 == var2`
+
+**Interpretation**: If p < 0.05, the difference is statistically significant."""
+
+    if "anova" in msg:
+        return """**ANOVA Overview**
+
+ANOVA (Analysis of Variance) compares means across 3+ groups:
+
+- **One-way ANOVA**: One factor with multiple levels
+  - Stata: `oneway depvar groupvar`
+
+- **Two-way ANOVA**: Two factors, tests main effects and interaction
+  - Stata: `anova depvar factor1##factor2`
+
+**Assumptions**: Normality, equal variances (check with Levene's test)
+**Post-hoc**: If significant, use Tukey HSD to find which groups differ
+
+**Interpretation**: F-statistic shows ratio of between/within variance. p < 0.05 = significant."""
+
+    if "chi" in msg or "categorical" in msg:
+        return """**Chi-Square Test**
+
+Tests association between two categorical variables:
+
+- Stata: `tabulate var1 var2, chi2`
+
+**Assumptions**: Expected cell counts >= 5
+**Alternative**: Use Fisher's exact test for small samples (expected < 5)
+
+**Interpretation**: If p < 0.05, variables are associated (not independent).
+Cramer's V shows effect size (0-1)."""
+
+    if "normal" in msg:
+        return """**Normality Testing**
+
+Check if data follows normal distribution:
+
+- **Shapiro-Wilk test**: Best for small samples (n < 50)
+  - Stata: `swilk varname`
+  - p > 0.05 suggests normality
+
+- **Visual check**: Histogram, Q-Q plot
+
+**If not normal**: Use non-parametric alternatives:
+- Mann-Whitney instead of t-test
+- Kruskal-Wallis instead of ANOVA"""
+
+    if "sample size" in msg or "power" in msg:
+        return """**Power & Sample Size**
+
+**Power analysis**: Probability of detecting a true effect
+- Need: effect size, alpha (usually 0.05), sample size
+- Target: 80% power minimum
+
+**Sample size calculation**: How many subjects needed?
+- Need: effect size, desired power (0.80), alpha (0.05)
+- Cohen's d: 0.2 (small), 0.5 (medium), 0.8 (large)
+
+Stata: `power twomeans m1 m2, sd(s)`"""
+
+    # Default response
+    return """I can help you with statistical analysis. Here are some things you can ask:
+
+- **"What test should I use?"** - I'll recommend based on your data
+- **"Explain t-test"** - Get details on when/how to use it
+- **"What does p-value mean?"** - Statistical interpretation help
+- **"How do I run ANOVA?"** - Step-by-step guidance
+
+You can also hover over test buttons in the right panel for quick explanations.
+
+*Note: Ollama AI is not available, so I'm providing pre-written guidance.*"""
+
+
 # ---------------------------------------------------------------------------
 # ROUTES — Command-line interface
 # ---------------------------------------------------------------------------

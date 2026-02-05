@@ -1,6 +1,6 @@
 /**
- * SolarSTATA v2.0 - Main Application JavaScript
- * Stata 19-inspired statistical analysis interface with AI integration.
+ * $TATA v2.0 - Main Application JavaScript
+ * Statistical analysis interface with AI integration.
  *
  * Matches HTML (templates/index.html) and CSS (static/css/stata.css).
  */
@@ -18,6 +18,7 @@ const S = {
     histIdx:      -1,
     curTab:       "output",
     curTest:      null,         // which stat test modal is being configured
+    chatHistory:  [],           // AI chat message history
 };
 
 /* ==================================================================
@@ -33,8 +34,10 @@ document.addEventListener("DOMContentLoaded", () => {
     initModals();
     initVariableSearch();
     initKeyboard();
+    initChat();
+    initTooltips();
     loadModels();
-    toast("SolarSTATA ready. Load data to begin.", "success");
+    toast("$TATA ready. Load data to begin.", "success");
 });
 
 /* ==================================================================
@@ -75,12 +78,14 @@ function initToolbar() {
     const fileInput = document.getElementById("file-input");
     const btnSave = document.getElementById("btn-save-log");
     const btnHelp = document.getElementById("btn-help");
+    const btnChat = document.getElementById("btn-chat");
     const banner = document.getElementById("dismiss-banner");
 
     if (btnOpen) btnOpen.addEventListener("click", () => fileInput.click());
     if (fileInput) fileInput.addEventListener("change", handleFileUpload);
     if (btnSave) btnSave.addEventListener("click", saveLog);
     if (btnHelp) btnHelp.addEventListener("click", showHelp);
+    if (btnChat) btnChat.addEventListener("click", () => switchTab("chat"));
     if (banner) banner.addEventListener("click", () => {
         document.getElementById("fallback-banner").style.display = "none";
     });
@@ -108,11 +113,68 @@ async function handleFileUpload(e) {
         document.getElementById("status-data").textContent = `${d.shape[0]} obs, ${d.shape[1]} vars`;
         appendOutput("use", `use "${d.filename}"`, d.message || "Data loaded.");
         toast(d.message || "Data loaded.", "success");
+        // Auto-analyze: run AI data assessment
+        autoAnalyzeData(d.filename, d.data_info);
     } catch (err) {
         toast(`Upload failed: ${err.message}`, "error");
         setStatus("error", "Upload failed");
     }
     e.target.value = "";
+}
+
+async function autoAnalyzeData(filename, dataInfo) {
+    // Auto-run AI analysis on uploaded data
+    setStatus("loading", "AI analyzing data structure...");
+    try {
+        const cols = S.columns.slice(0, 10); // Use first 10 columns for initial analysis
+        const r = await fetch("/api/stats/smart", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ columns: cols }),
+        });
+        const d = await r.json();
+        if (d.error) { setStatus("ok", "Data loaded"); return; }
+
+        const res = d.result;
+        let analysis = "=".repeat(60) + "\n";
+        analysis += "  AUTO-ANALYSIS: Data Structure Assessment\n";
+        analysis += "=".repeat(60) + "\n\n";
+        analysis += `  File: ${filename}\n`;
+        analysis += `  Rows: ${dataInfo?.variable_info?.length ? 'Variables detected' : 'N/A'}\n\n`;
+
+        // Variable types
+        if (res.variable_types) {
+            analysis += "  Variable Classification:\n";
+            Object.entries(res.variable_types).forEach(([v, t]) => {
+                analysis += `    ${v}: ${t}\n`;
+            });
+            analysis += "\n";
+        }
+
+        // Suggested test
+        if (res.selected_test) {
+            analysis += `  Suggested Test: ${res.selected_test}\n`;
+            if (res.reasoning) analysis += `  Reasoning: ${res.reasoning}\n`;
+        }
+
+        // Group candidates
+        if (dataInfo?.group_candidates?.length) {
+            analysis += "\n  Potential grouping variables:\n";
+            dataInfo.group_candidates.forEach(g => {
+                analysis += `    ${g.column} (${g.n_groups} groups)\n`;
+            });
+        }
+
+        analysis += "\n" + "=".repeat(60) + "\n";
+        analysis += "  Tip: Select variables and click Smart Analysis for specific tests.\n";
+        analysis += "=".repeat(60);
+
+        appendOutput("info", "auto-analyze", analysis);
+        setStatus("ok", "Data analyzed");
+        toast("AI analysis complete - see Output tab", "success");
+    } catch (err) {
+        setStatus("ok", "Data loaded");
+    }
 }
 
 function saveLog() {
@@ -129,13 +191,13 @@ function saveLog() {
 
 function showHelp() {
     const help = [
-        "SolarSTATA v2.0 - Quick Reference",
+        "$TATA v2.0 - Quick Reference",
         "=".repeat(40),
         "",
         "Keyboard Shortcuts:",
         "  Ctrl+O     Open file",
         "  Ctrl+L     Focus command bar",
-        "  Ctrl+1/2/3 Switch tabs",
+        "  Ctrl+1/2/3/4 Switch tabs",
         "",
         "Commands (type in command bar):",
         "  summarize [vars]",
@@ -145,8 +207,13 @@ function showHelp() {
         "  regress dep indep1 indep2",
         "  help",
         "",
+        "Features:",
+        "  - Auto-analysis on file upload",
+        "  - AI Chat tab for questions",
+        "  - Hover test buttons for explanations",
+        "  - Smart Analysis auto-selects best test",
+        "",
         "Right panel: click Tests or AI Agent tab.",
-        "Select variables in left panel, then click Smart Analysis.",
     ];
     appendOutput("info", "help", help.join("\n"));
     switchTab("output");
@@ -536,10 +603,6 @@ function openStatModal(testKey) {
    ================================================================== */
 function initAgentButtons() {
     document.getElementById("btn-universal")?.addEventListener("click", () => openModal("universal-modal"));
-    document.getElementById("btn-ai-analyze")?.addEventListener("click", () => {
-        if (!S.loaded) { toast("Load data first", "error"); return; }
-        openModal("ai-modal");
-    });
     document.getElementById("btn-messy-data")?.addEventListener("click", () => {
         if (!S.loaded) { toast("Load data first", "error"); return; }
         openModal("messy-modal");
@@ -553,10 +616,113 @@ function initAgentButtons() {
         document.getElementById("universal-file-input")?.click();
     });
     document.getElementById("universal-file-input")?.addEventListener("change", handleUniversalFile);
-    document.getElementById("ai-run-btn")?.addEventListener("click", runAIAnalysis);
     document.getElementById("ss-run-btn")?.addEventListener("click", runSampleSizeText);
     document.getElementById("messy-run-btn")?.addEventListener("click", runMessyData);
     document.getElementById("lit-run-btn")?.addEventListener("click", runLitReview);
+}
+
+/* ==================================================================
+   11b. AI CHAT
+   ================================================================== */
+function initChat() {
+    const sendBtn = document.getElementById("chat-send");
+    const input = document.getElementById("chat-input");
+
+    if (sendBtn) sendBtn.addEventListener("click", sendChatMessage);
+    if (input) {
+        input.addEventListener("keydown", e => {
+            if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                sendChatMessage();
+            }
+        });
+    }
+}
+
+async function sendChatMessage() {
+    const input = document.getElementById("chat-input");
+    const messages = document.getElementById("chat-messages");
+    if (!input || !messages) return;
+
+    const text = input.value.trim();
+    if (!text) return;
+
+    // Clear welcome message on first message
+    const welcome = messages.querySelector(".chat-welcome");
+    if (welcome) welcome.remove();
+
+    // Add user message
+    const userMsg = document.createElement("div");
+    userMsg.className = "chat-message user";
+    userMsg.textContent = text;
+    messages.appendChild(userMsg);
+
+    // Clear input
+    input.value = "";
+
+    // Add thinking indicator
+    const thinkingMsg = document.createElement("div");
+    thinkingMsg.className = "chat-message thinking";
+    thinkingMsg.textContent = "Thinking";
+    messages.appendChild(thinkingMsg);
+    messages.scrollTop = messages.scrollHeight;
+
+    // Build context for AI
+    let context = `User question: ${text}\n\n`;
+    if (S.loaded && S.dataInfo) {
+        context += `Loaded data has ${S.columns.length} columns: ${S.columns.join(", ")}\n`;
+        if (S.dataInfo.numeric_columns) context += `Numeric: ${S.dataInfo.numeric_columns.join(", ")}\n`;
+        if (S.dataInfo.categorical_columns) context += `Categorical: ${S.dataInfo.categorical_columns.join(", ")}\n`;
+    }
+
+    try {
+        const r = await fetch("/api/agent/chat", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ message: text, context: context, history: S.chatHistory.slice(-10) }),
+        });
+        const d = await r.json();
+
+        // Remove thinking indicator
+        thinkingMsg.remove();
+
+        // Add assistant response
+        const assistantMsg = document.createElement("div");
+        assistantMsg.className = "chat-message assistant";
+        assistantMsg.innerHTML = formatChatResponse(d.response || d.error || "No response");
+        messages.appendChild(assistantMsg);
+
+        // Update history
+        S.chatHistory.push({ role: "user", content: text });
+        S.chatHistory.push({ role: "assistant", content: d.response || d.error });
+
+    } catch (err) {
+        thinkingMsg.remove();
+        const errorMsg = document.createElement("div");
+        errorMsg.className = "chat-message assistant";
+        errorMsg.textContent = `Error: ${err.message}`;
+        messages.appendChild(errorMsg);
+    }
+
+    messages.scrollTop = messages.scrollHeight;
+}
+
+function formatChatResponse(text) {
+    // Simple markdown-like formatting
+    return text
+        .replace(/```([\s\S]*?)```/g, '<pre>$1</pre>')
+        .replace(/`([^`]+)`/g, '<code>$1</code>')
+        .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+        .replace(/\n/g, '<br>');
+}
+
+/* ==================================================================
+   11c. TOOLTIPS FOR TEST BUTTONS
+   ================================================================== */
+function initTooltips() {
+    document.querySelectorAll("[data-help]").forEach(btn => {
+        btn.setAttribute("title", btn.dataset.help);
+    });
 }
 
 /* ==================================================================
