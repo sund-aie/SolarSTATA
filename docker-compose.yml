@@ -1,0 +1,15 @@
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: solarstata-backend
+    ports:
+      - "8000:8000"
+    environment:
+      SOLARSTATA_HOST: 0.0.0.0
+      SOLARSTATA_PORT: 8000
+      SOLARSTATA_SESSION_SECRET: dev-only-replace-in-prod
+    volumes:
+      - ./backend/src:/app/backend/src:ro
+    restart: unless-stopped

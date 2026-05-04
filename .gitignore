@@ -1,3 +1,39 @@
+# Python
 __pycache__/
-*.pyc
+*.py[cod]
+*.egg-info/
+*.egg
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+env/
+
+# DuckDB
+*.duckdb
+*.duckdb.wal
+
+# Uploaded user files (transient — never commit user data)
+backend/uploads/
+backend/.sessions/
 uploads/
+
+# Node / frontend
+node_modules/
+dist/
+.vite/
+
+# Editor
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# Build artifacts
+build/
+*.whl
