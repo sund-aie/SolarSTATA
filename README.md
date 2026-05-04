@@ -1,59 +1,81 @@
-# SolarSTATA
+# SolarSTATA v3
 
-AI-powered statistical analysis application with a Stata 19-like interface, built with Flask.
+A point-and-click Stata replica for non-technical researchers — with a Pro mode
+for power users. Built to make statistical analysis approachable for dental,
+medical, and clinical research without giving up the rigor and reproducibility
+of Stata.
 
-## Prerequisites
+> **Status:** Phase 1 (backend skeleton). Frontend lands in Phase 2. See the
+> kickoff brief for the full phasing.
 
-- Python 3.9 or higher
-- [Ollama](https://ollama.com/) (optional, for AI-powered analysis features)
+## What's in the box
 
-## Installation
+- **Guided mode** (Phase 2+) — wizard-style: Import → Inspect → Clean →
+  Analyze → Visualize → Export. No command typing required.
+- **Pro mode** (Phase 2+) — Monaco editor with Stata syntax, 4-pane layout,
+  WebSocket-streamed results.
+- **One statistical engine** — both modes share the same backend; switching
+  modes preserves dataset and `e()` results.
+- **Built-in walkthroughs** (Phase 4) — 5 interactive tutorials on a bundled
+  synthetic dental dataset.
 
-1. Clone the repository:
-
-```bash
-git clone https://github.com/sund-aie/SolarSTATA.git
-cd SolarSTATA
-```
-
-2. Install the required Python packages:
-
-```bash
-pip install -r requirements.txt
-```
-
-3. (Optional) If you want AI-powered analysis, install Ollama and pull the LLaMA model:
+## Quick start (Phase 1 backend)
 
 ```bash
-ollama pull llama3.2
+make dev-backend       # installs deps and runs FastAPI on :8000
+make test              # runs the backend test suite
+curl http://localhost:8000/healthz
 ```
 
-## Running the Application
-
-Start the Flask server:
+Or, without `make`:
 
 ```bash
-python3 app.py
+cd backend
+pip install -e ".[dev]"
+uvicorn solarstata.main:app --reload --port 8000
 ```
 
-The app will run at **http://127.0.0.1:5001**.
+## Project layout
 
-Open that URL in your browser to access the SolarSTATA interface.
+```
+backend/                FastAPI + DuckDB + statsmodels stats engine
+  src/solarstata/
+    api/                HTTP routes
+    session/            cookie-based session middleware + in-memory store
+    engine/             stats functions + Stata-style formatters + e() store
+    io/                 readers/writers (csv, xlsx, dta, parquet)
+    walkthroughs/       bundled clinic_patients dataset + walkthrough configs
+  tests/                pytest
+frontend/               React + TypeScript + Vite + Tailwind (Phase 2+)
+archive/v1-v2/          previous Flask implementation, kept for cross-reference
+```
 
-> **Note for macOS users:** Port 5001 is used instead of the default 5000 to avoid conflicts with AirPlay Receiver, which occupies port 5000 on macOS Monterey and later.
+## Tech stack (locked)
 
-## Features
+| Layer | Choice |
+|---|---|
+| Frontend | React + TypeScript + Tailwind, Vite |
+| Pro editor | Monaco with Stata language definition |
+| Backend | FastAPI, Python 3.11+ |
+| Data engine | DuckDB in-process + pandas |
+| Statistics | statsmodels, linearmodels, scipy |
+| File I/O | pyreadstat (.dta), pandas/pyarrow (rest) |
+| Graphs | Plotly (server returns JSON, client renders) |
+| Session | In-memory, cookie-keyed, 24h idle eviction |
 
-- **Data Import** -- Upload CSV, Excel (.xlsx/.xls), Stata (.dta), and TSV/TXT files (up to 50 MB).
-- **Descriptive Statistics** -- Summarize, tabulate, and explore your data.
-- **Statistical Tests** -- T-tests, ANOVA, chi-square, correlation, regression (OLS, logistic, probit), non-parametric tests, survival analysis, and power analysis.
-- **Stata-Style Command Line** -- Type commands like `summarize`, `regress`, `ttest`, and `tabulate` directly.
-- **AI Analysis** -- Automated test selection and code generation via Ollama/LLaMA (requires Ollama running locally).
-- **Literature Search** -- Search PubMed and CrossRef for related academic papers.
+## Development
 
-## Usage
+```bash
+make dev-backend       # FastAPI auto-reload
+make test              # pytest with coverage
+make lint              # ruff + mypy (Phase 1.1)
+make docker            # build container image
+make docker-up         # docker-compose up backend
+```
 
-1. Open the app in your browser at http://127.0.0.1:5001.
-2. Upload a dataset using **File > Open**.
-3. Use the GUI panels or the command line to run statistical tests.
-4. (Optional) Use the AI assistant to get test recommendations and automated analysis.
+## Reference
+
+`stata19_deep_dive.html` (provided separately) is the authoritative spec for
+statistical method coverage and engine layering. The older
+`Stata: Technical Specification and Operational Logic.rtf` lives in
+`archive/v1-v2/` for historical reference only.
