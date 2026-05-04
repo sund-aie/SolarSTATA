@@ -1,0 +1,1301 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SolarSTATA v3 — UI Mockup</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600;700&family=Geist+Mono:wght@400;500;600&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    /* Warm dark palette — Notion-soft, not GitHub-cold */
+    --bg: #16140F;
+    --surface: #1E1B16;
+    --surface-2: #26221C;
+    --surface-3: #2F2A22;
+    --border: #2A2620;
+    --border-strong: #3A3529;
+    --text: #ECE7DA;
+    --text-muted: #968E7D;
+    --text-faint: #5C5648;
+
+    /* Single warm gold accent */
+    --accent: #D4B36A;
+    --accent-soft: rgba(212, 179, 106, 0.12);
+    --accent-glow: rgba(212, 179, 106, 0.22);
+
+    /* Semantic */
+    --good: #8FAA88;
+    --good-soft: rgba(143, 170, 136, 0.14);
+    --warn: #D89B7E;
+    --warn-soft: rgba(216, 155, 126, 0.14);
+    --info: #8FA8C4;
+    --info-soft: rgba(143, 168, 196, 0.14);
+
+    /* Type */
+    --serif: 'Instrument Serif', Georgia, serif;
+    --sans: 'Geist', -apple-system, BlinkMacSystemFont, sans-serif;
+    --mono: 'Geist Mono', 'SF Mono', monospace;
+
+    /* Spacing */
+    --radius-sm: 8px;
+    --radius-md: 12px;
+    --radius-lg: 16px;
+    --radius-xl: 20px;
+
+    /* Shadows */
+    --shadow-soft: 0 1px 2px rgba(0,0,0,0.2), 0 4px 12px rgba(0,0,0,0.15);
+    --shadow-elevated: 0 4px 8px rgba(0,0,0,0.25), 0 12px 32px rgba(0,0,0,0.2);
+  }
+
+  html, body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    font-size: 14px;
+    line-height: 1.5;
+    height: 100vh;
+    overflow: hidden;
+    font-feature-settings: 'cv11', 'ss01';
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  /* Subtle warm grain — barely visible but adds atmosphere */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2'/%3E%3CfeColorMatrix values='0 0 0 0 0.83 0 0 0 0 0.70 0 0 0 0 0.42 0 0 0 0.04 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+    opacity: 0.6;
+    z-index: 1;
+  }
+
+  .app {
+    display: grid;
+    grid-template-rows: 56px 1fr;
+    height: 100vh;
+    position: relative;
+    z-index: 2;
+  }
+
+  /* ============== TOP BAR ============== */
+  .topbar {
+    display: flex;
+    align-items: center;
+    padding: 0 20px;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg);
+    gap: 24px;
+  }
+
+  .wordmark {
+    display: flex;
+    align-items: baseline;
+    gap: 0;
+    user-select: none;
+  }
+
+  .wordmark .s {
+    font-family: var(--serif);
+    font-size: 26px;
+    font-style: italic;
+    color: var(--accent);
+    line-height: 1;
+    margin-right: 1px;
+  }
+
+  .wordmark .rest {
+    font-family: var(--sans);
+    font-size: 15px;
+    font-weight: 500;
+    letter-spacing: 0.04em;
+    color: var(--text);
+  }
+
+  .wordmark .v {
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--text-faint);
+    margin-left: 8px;
+    padding: 2px 6px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+  }
+
+  /* Mode toggle pill */
+  .mode-toggle {
+    display: flex;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 3px;
+    position: relative;
+  }
+
+  .mode-toggle button {
+    background: none;
+    border: none;
+    padding: 5px 16px;
+    font-family: var(--sans);
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--text-muted);
+    cursor: pointer;
+    border-radius: 999px;
+    transition: color 0.2s;
+    position: relative;
+    z-index: 2;
+    letter-spacing: 0.01em;
+  }
+
+  .mode-toggle button.active {
+    color: var(--bg);
+  }
+
+  .mode-toggle .pill {
+    position: absolute;
+    top: 3px;
+    bottom: 3px;
+    width: calc(50% - 3px);
+    background: var(--accent);
+    border-radius: 999px;
+    transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    z-index: 1;
+  }
+
+  .mode-toggle.pro-active .pill {
+    transform: translateX(100%);
+  }
+
+  .topbar-spacer { flex: 1; }
+
+  .session-chip {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 12px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--text-muted);
+  }
+
+  .session-chip .dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--good);
+    box-shadow: 0 0 8px rgba(143, 170, 136, 0.6);
+  }
+
+  .session-chip .filename { color: var(--text); }
+
+  .icon-btn {
+    width: 32px;
+    height: 32px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    color: var(--text-muted);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.15s;
+  }
+
+  .icon-btn:hover {
+    color: var(--text);
+    border-color: var(--border-strong);
+    background: var(--surface-2);
+  }
+
+  /* ============== MAIN LAYOUT ============== */
+  .main {
+    display: grid;
+    grid-template-columns: 240px 1fr 380px;
+    overflow: hidden;
+  }
+
+  /* ============== LEFT RAIL — WIZARD ============== */
+  .wizard {
+    border-right: 1px solid var(--border);
+    padding: 24px 16px;
+    overflow-y: auto;
+    background: var(--bg);
+  }
+
+  .wizard-label {
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--text-faint);
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    padding: 0 8px 12px;
+  }
+
+  .wizard-step {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 12px;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    margin-bottom: 2px;
+    color: var(--text-muted);
+    transition: all 0.15s;
+    position: relative;
+  }
+
+  .wizard-step:hover {
+    background: var(--surface);
+    color: var(--text);
+  }
+
+  .wizard-step.active {
+    background: var(--surface);
+    color: var(--text);
+  }
+
+  .wizard-step.active::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 8px;
+    bottom: 8px;
+    width: 2px;
+    background: var(--accent);
+    border-radius: 1px;
+  }
+
+  .wizard-step.done .step-num {
+    background: var(--good-soft);
+    color: var(--good);
+    border-color: var(--good);
+  }
+
+  .step-num {
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    border: 1px solid var(--border-strong);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: var(--mono);
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--text-muted);
+    flex-shrink: 0;
+  }
+
+  .wizard-step.active .step-num {
+    background: var(--accent);
+    color: var(--bg);
+    border-color: var(--accent);
+  }
+
+  .step-name {
+    font-size: 13px;
+    font-weight: 500;
+    letter-spacing: -0.005em;
+  }
+
+  .wizard-divider {
+    height: 1px;
+    background: var(--border);
+    margin: 16px 8px;
+  }
+
+  .wizard-help {
+    padding: 12px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    font-size: 12px;
+    color: var(--text-muted);
+    line-height: 1.55;
+    margin-top: 8px;
+  }
+
+  .wizard-help strong {
+    color: var(--text);
+    font-weight: 500;
+    display: block;
+    margin-bottom: 4px;
+    font-family: var(--serif);
+    font-size: 14px;
+    font-style: italic;
+  }
+
+  /* ============== CENTER — ACTIVE STEP ============== */
+  .step-pane {
+    overflow-y: auto;
+    padding: 32px 40px 80px;
+  }
+
+  .step-header {
+    margin-bottom: 32px;
+  }
+
+  .step-eyebrow {
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--text-faint);
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    margin-bottom: 8px;
+  }
+
+  .step-title {
+    font-family: var(--serif);
+    font-size: 32px;
+    line-height: 1.15;
+    color: var(--text);
+    letter-spacing: -0.01em;
+    margin-bottom: 6px;
+  }
+
+  .step-title em {
+    color: var(--accent);
+    font-style: italic;
+  }
+
+  .step-sub {
+    color: var(--text-muted);
+    font-size: 14px;
+    max-width: 520px;
+  }
+
+  /* Dataset summary bar */
+  .dataset-bar {
+    display: flex;
+    align-items: center;
+    gap: 24px;
+    padding: 14px 18px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    margin-bottom: 24px;
+  }
+
+  .dataset-bar-item {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+  }
+
+  .dataset-bar-num {
+    font-family: var(--mono);
+    font-size: 14px;
+    color: var(--text);
+    font-weight: 500;
+  }
+
+  .dataset-bar-label {
+    font-size: 12px;
+    color: var(--text-muted);
+  }
+
+  .dataset-bar-name {
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--accent);
+    margin-right: auto;
+  }
+
+  /* Variable cards */
+  .vars-section-label {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 12px;
+    color: var(--text-muted);
+    font-size: 12px;
+  }
+
+  .vars-section-label .line {
+    flex: 1;
+    height: 1px;
+    background: var(--border);
+  }
+
+  .var-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    gap: 10px;
+  }
+
+  .var-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    padding: 14px;
+    cursor: pointer;
+    transition: all 0.15s;
+    position: relative;
+  }
+
+  .var-card:hover {
+    border-color: var(--border-strong);
+    background: var(--surface-2);
+    transform: translateY(-1px);
+  }
+
+  .var-card.selected {
+    border-color: var(--accent);
+    background: var(--accent-soft);
+  }
+
+  .var-card.selected::before {
+    content: '';
+    position: absolute;
+    inset: -1px;
+    border-radius: var(--radius-md);
+    pointer-events: none;
+    box-shadow: 0 0 0 3px var(--accent-glow);
+  }
+
+  .var-card-top {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    margin-bottom: 8px;
+    gap: 8px;
+  }
+
+  .var-name {
+    font-family: var(--mono);
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .type-chip {
+    font-family: var(--mono);
+    font-size: 9px;
+    padding: 2px 6px;
+    border-radius: 4px;
+    text-transform: lowercase;
+    letter-spacing: 0.04em;
+    font-weight: 500;
+    flex-shrink: 0;
+  }
+
+  .type-chip.numeric { background: var(--info-soft); color: var(--info); }
+  .type-chip.binary  { background: var(--good-soft); color: var(--good); }
+  .type-chip.categorical { background: var(--warn-soft); color: var(--warn); }
+  .type-chip.string  { background: rgba(180,160,210,0.14); color: #B4A0D2; }
+  .type-chip.id      { background: rgba(160,160,160,0.10); color: var(--text-muted); }
+
+  .var-meta {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--text-muted);
+    margin-bottom: 10px;
+  }
+
+  .var-meta .miss {
+    color: var(--warn);
+  }
+
+  .var-meta .miss.zero {
+    color: var(--text-faint);
+  }
+
+  /* Sparkline / mini-histogram */
+  .var-spark {
+    height: 26px;
+    display: flex;
+    align-items: flex-end;
+    gap: 1.5px;
+  }
+
+  .var-spark .bar {
+    flex: 1;
+    background: var(--text-faint);
+    border-radius: 1.5px 1.5px 0 0;
+    transition: background 0.15s;
+    min-height: 2px;
+  }
+
+  .var-card:hover .var-spark .bar { background: var(--text-muted); }
+  .var-card.selected .var-spark .bar { background: var(--accent); }
+
+  /* ============== RIGHT RAIL — INSPECT PANEL ============== */
+  .inspect {
+    border-left: 1px solid var(--border);
+    overflow-y: auto;
+    background: var(--bg);
+    display: flex;
+    flex-direction: column;
+  }
+
+  .inspect-empty {
+    padding: 60px 32px;
+    text-align: center;
+    color: var(--text-muted);
+    font-size: 13px;
+  }
+
+  .inspect-header {
+    padding: 24px 24px 20px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .inspect-eyebrow {
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--text-faint);
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    margin-bottom: 6px;
+  }
+
+  .inspect-title {
+    font-family: var(--mono);
+    font-size: 18px;
+    color: var(--text);
+    margin-bottom: 4px;
+    font-weight: 500;
+  }
+
+  .inspect-label {
+    font-family: var(--serif);
+    font-size: 14px;
+    font-style: italic;
+    color: var(--text-muted);
+  }
+
+  .inspect-stats {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1px;
+    background: var(--border);
+    border-bottom: 1px solid var(--border);
+  }
+
+  .inspect-stat {
+    padding: 14px 24px;
+    background: var(--bg);
+  }
+
+  .inspect-stat-label {
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--text-faint);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    margin-bottom: 4px;
+  }
+
+  .inspect-stat-value {
+    font-family: var(--mono);
+    font-size: 15px;
+    color: var(--text);
+    font-weight: 500;
+  }
+
+  .inspect-stat-value .unit {
+    font-size: 11px;
+    color: var(--text-muted);
+    margin-left: 3px;
+  }
+
+  /* Histogram */
+  .hist-section {
+    padding: 24px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .hist-section-label {
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--text-faint);
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    margin-bottom: 12px;
+  }
+
+  .hist {
+    height: 72px;
+    display: flex;
+    align-items: flex-end;
+    gap: 2px;
+  }
+
+  .hist .bar {
+    flex: 1;
+    background: linear-gradient(to top, var(--accent), rgba(212, 179, 106, 0.55));
+    border-radius: 2px 2px 0 0;
+    min-height: 3px;
+    position: relative;
+  }
+
+  .hist-axis {
+    display: flex;
+    justify-content: space-between;
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--text-faint);
+    margin-top: 6px;
+  }
+
+  /* Run summarize button + results */
+  .run-section {
+    padding: 24px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .run-btn {
+    width: 100%;
+    background: var(--accent);
+    color: var(--bg);
+    border: none;
+    padding: 11px 16px;
+    border-radius: var(--radius-sm);
+    font-family: var(--sans);
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: filter 0.15s, transform 0.05s;
+    letter-spacing: 0.005em;
+  }
+
+  .run-btn:hover { filter: brightness(1.08); }
+  .run-btn:active { transform: translateY(1px); }
+  .run-btn.secondary {
+    background: var(--surface);
+    color: var(--text);
+    border: 1px solid var(--border);
+  }
+  .run-btn.secondary:hover {
+    background: var(--surface-2);
+    border-color: var(--border-strong);
+    filter: none;
+  }
+
+  .results-card {
+    margin-top: 16px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    overflow: hidden;
+  }
+
+  .results-card-header {
+    padding: 10px 14px;
+    background: var(--surface-2);
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .results-card-title {
+    font-family: var(--serif);
+    font-style: italic;
+    font-size: 13px;
+    color: var(--text);
+  }
+
+  .results-card-time {
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--text-faint);
+  }
+
+  .results-card-body {
+    padding: 14px;
+  }
+
+  .result-row {
+    display: grid;
+    grid-template-columns: 80px 1fr;
+    gap: 12px;
+    padding: 6px 0;
+    font-family: var(--mono);
+    font-size: 12px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .result-row:last-child { border-bottom: none; }
+  .result-row .k { color: var(--text-muted); }
+  .result-row .v { color: var(--text); text-align: right; }
+
+  /* Command preview at bottom */
+  .cmd-preview {
+    margin-top: auto;
+    padding: 16px 24px;
+    background: var(--surface);
+    border-top: 1px solid var(--border);
+  }
+
+  .cmd-preview-label {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 8px;
+  }
+
+  .cmd-preview-label-text {
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--text-faint);
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+  }
+
+  .cmd-copy {
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--text-muted);
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 2px 6px;
+    border-radius: 4px;
+  }
+
+  .cmd-copy:hover { color: var(--accent); background: var(--accent-soft); }
+
+  .cmd-code {
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--text);
+    padding: 10px 12px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    line-height: 1.5;
+  }
+
+  .cmd-code .kw { color: var(--accent); }
+  .cmd-code .var-tk { color: var(--info); }
+
+  /* ============== PRO MODE — 4-PANE ============== */
+  .pro-layout {
+    display: none;
+    grid-template-columns: 240px 1fr 360px;
+    grid-template-rows: 1fr 240px;
+    height: 100%;
+    gap: 1px;
+    background: var(--border);
+  }
+
+  .pro-active .pro-layout { display: grid; }
+  .pro-active .main { display: none; }
+
+  .pane {
+    background: var(--bg);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    position: relative;
+  }
+
+  .pane-header {
+    padding: 10px 16px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+
+  .pane-title {
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--text-faint);
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+  }
+
+  .pane-vars { grid-row: 1 / 3; }
+  .pane-cmd { grid-column: 2; grid-row: 1; }
+  .pane-graphs { grid-column: 3; grid-row: 1 / 3; }
+  .pane-results { grid-column: 2; grid-row: 2; }
+
+  .pane-empty {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+    gap: 8px;
+    color: var(--text-faint);
+    font-size: 12px;
+    text-align: center;
+    padding: 20px;
+  }
+
+  .pane-empty .badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--text-muted);
+    letter-spacing: 0.04em;
+  }
+
+  .pane-empty .badge .dot {
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: var(--accent);
+  }
+
+  /* Variables list (Pro) */
+  .pro-var-list {
+    flex: 1;
+    overflow-y: auto;
+    padding: 8px 0;
+  }
+
+  .pro-var {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 7px 16px;
+    cursor: pointer;
+    font-size: 12px;
+    border-left: 2px solid transparent;
+  }
+
+  .pro-var:hover {
+    background: var(--surface);
+    border-left-color: var(--border-strong);
+  }
+
+  .pro-var .pname {
+    font-family: var(--mono);
+    color: var(--text);
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .pro-var .ptype {
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--text-faint);
+  }
+
+  /* Monaco mock */
+  .editor-mock {
+    flex: 1;
+    padding: 16px 20px;
+    font-family: var(--mono);
+    font-size: 13px;
+    line-height: 1.7;
+    overflow: auto;
+    color: var(--text);
+    background: var(--bg);
+    position: relative;
+  }
+
+  .editor-mock .ln {
+    color: var(--text-faint);
+    user-select: none;
+    margin-right: 16px;
+    display: inline-block;
+    width: 22px;
+    text-align: right;
+  }
+
+  .editor-mock .kw   { color: var(--accent); }
+  .editor-mock .vart { color: var(--info); }
+  .editor-mock .opt  { color: var(--good); }
+  .editor-mock .cmt  { color: var(--text-faint); font-style: italic; }
+  .editor-mock .cur  { background: rgba(212, 179, 106, 0.06); border-left: 2px solid var(--accent); margin-left: -20px; padding-left: 18px; }
+
+  /* Footer hint */
+  .floating-tip {
+    position: fixed;
+    bottom: 24px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: var(--surface-2);
+    border: 1px solid var(--border-strong);
+    color: var(--text-muted);
+    padding: 8px 14px;
+    border-radius: 999px;
+    font-size: 12px;
+    box-shadow: var(--shadow-elevated);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    z-index: 50;
+    backdrop-filter: blur(8px);
+  }
+
+  .floating-tip kbd {
+    font-family: var(--mono);
+    font-size: 10px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 1px 5px;
+    color: var(--text);
+  }
+
+  /* Scrollbar */
+  ::-webkit-scrollbar { width: 8px; height: 8px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--surface-2); border-radius: 4px; }
+  ::-webkit-scrollbar-thumb:hover { background: var(--surface-3); }
+</style>
+</head>
+<body>
+
+<div class="app" id="app">
+
+  <!-- ============ TOP BAR ============ -->
+  <header class="topbar">
+    <div class="wordmark">
+      <span class="s">S</span><span class="rest">olarSTATA</span>
+      <span class="v">v3.0.0a</span>
+    </div>
+
+    <div class="mode-toggle" id="modeToggle">
+      <div class="pill"></div>
+      <button class="active" data-mode="guided">Guided</button>
+      <button data-mode="pro">Pro</button>
+    </div>
+
+    <div class="topbar-spacer"></div>
+
+    <div class="session-chip">
+      <span class="dot"></span>
+      <span class="filename">clinic_patients.csv</span>
+      <span>·</span>
+      <span>406 obs × 13 vars</span>
+    </div>
+
+    <button class="icon-btn" title="Help (?)">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
+    </button>
+
+    <button class="icon-btn" title="Settings">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+    </button>
+  </header>
+
+  <!-- ============ GUIDED MAIN LAYOUT ============ -->
+  <div class="main">
+
+    <!-- Wizard left rail -->
+    <aside class="wizard">
+      <div class="wizard-label">Workflow</div>
+
+      <div class="wizard-step done">
+        <div class="step-num">✓</div>
+        <div class="step-name">Import</div>
+      </div>
+
+      <div class="wizard-step active">
+        <div class="step-num">2</div>
+        <div class="step-name">Inspect</div>
+      </div>
+
+      <div class="wizard-step">
+        <div class="step-num">3</div>
+        <div class="step-name">Clean</div>
+      </div>
+
+      <div class="wizard-step">
+        <div class="step-num">4</div>
+        <div class="step-name">Analyze</div>
+      </div>
+
+      <div class="wizard-step">
+        <div class="step-num">5</div>
+        <div class="step-name">Visualize</div>
+      </div>
+
+      <div class="wizard-step">
+        <div class="step-num">6</div>
+        <div class="step-name">Export</div>
+      </div>
+
+      <div class="wizard-divider"></div>
+
+      <div class="wizard-help">
+        <strong>Inspect your data</strong>
+        Click any variable card to see its distribution, missing values, and run quick descriptives. Watch for the <span style="color:var(--warn)">missing</span> badges.
+      </div>
+    </aside>
+
+    <!-- Center step pane -->
+    <main class="step-pane">
+      <div class="step-header">
+        <div class="step-eyebrow">Step 2 of 6</div>
+        <h1 class="step-title">Inspect your <em>variables</em></h1>
+        <p class="step-sub">Click any card to see its distribution and run summarize. Watch for unusual values, missingness, and types that look wrong.</p>
+      </div>
+
+      <div class="dataset-bar">
+        <div class="dataset-bar-name">clinic_patients.csv</div>
+        <div class="dataset-bar-item">
+          <span class="dataset-bar-num">406</span>
+          <span class="dataset-bar-label">observations</span>
+        </div>
+        <div class="dataset-bar-item">
+          <span class="dataset-bar-num">13</span>
+          <span class="dataset-bar-label">variables</span>
+        </div>
+        <div class="dataset-bar-item">
+          <span class="dataset-bar-num" style="color: var(--warn)">3.1%</span>
+          <span class="dataset-bar-label">missing overall</span>
+        </div>
+      </div>
+
+      <div class="vars-section-label">
+        <span>13 variables</span>
+        <span class="line"></span>
+      </div>
+
+      <div class="var-grid" id="varGrid">
+        <!-- Cards injected via JS so sparklines vary -->
+      </div>
+    </main>
+
+    <!-- Right inspect rail -->
+    <aside class="inspect" id="inspect">
+      <div class="inspect-header">
+        <div class="inspect-eyebrow">Inspecting</div>
+        <div class="inspect-title">plaque_index</div>
+        <div class="inspect-label">Silness–Löe plaque index (0–3)</div>
+      </div>
+
+      <div class="inspect-stats">
+        <div class="inspect-stat">
+          <div class="inspect-stat-label">Type</div>
+          <div class="inspect-stat-value">numeric<span class="unit">float</span></div>
+        </div>
+        <div class="inspect-stat">
+          <div class="inspect-stat-label">Observations</div>
+          <div class="inspect-stat-value">379 <span class="unit">/ 406</span></div>
+        </div>
+        <div class="inspect-stat">
+          <div class="inspect-stat-label">Missing</div>
+          <div class="inspect-stat-value" style="color: var(--warn)">27 <span class="unit">6.7%</span></div>
+        </div>
+        <div class="inspect-stat">
+          <div class="inspect-stat-label">Range</div>
+          <div class="inspect-stat-value">−0.5 → 8.0</div>
+        </div>
+      </div>
+
+      <div class="hist-section">
+        <div class="hist-section-label">Distribution</div>
+        <div class="hist" id="hist"></div>
+        <div class="hist-axis">
+          <span>−0.5</span>
+          <span>1.4 (mean)</span>
+          <span>8.0</span>
+        </div>
+      </div>
+
+      <div class="run-section">
+        <button class="run-btn">Run summarize</button>
+
+        <div class="results-card">
+          <div class="results-card-header">
+            <div class="results-card-title">Summary statistics</div>
+            <div class="results-card-time">just now</div>
+          </div>
+          <div class="results-card-body">
+            <div class="result-row"><span class="k">Obs</span><span class="v">379</span></div>
+            <div class="result-row"><span class="k">Mean</span><span class="v">1.441953</span></div>
+            <div class="result-row"><span class="k">Std. dev.</span><span class="v">0.580177</span></div>
+            <div class="result-row"><span class="k">Min</span><span class="v">−0.5</span></div>
+            <div class="result-row"><span class="k">Max</span><span class="v">8.0</span></div>
+          </div>
+        </div>
+
+        <button class="run-btn secondary" style="margin-top: 10px;">Run summarize, detail</button>
+      </div>
+
+      <div class="cmd-preview">
+        <div class="cmd-preview-label">
+          <span class="cmd-preview-label-text">Pro command equivalent</span>
+          <button class="cmd-copy">Copy</button>
+        </div>
+        <div class="cmd-code">
+          <span class="kw">summarize</span> <span class="var-tk">plaque_index</span>
+        </div>
+      </div>
+    </aside>
+
+  </div>
+
+  <!-- ============ PRO MODE LAYOUT ============ -->
+  <div class="pro-layout">
+
+    <!-- Variables -->
+    <div class="pane pane-vars">
+      <div class="pane-header">
+        <span class="pane-title">Variables · 13</span>
+      </div>
+      <div class="pro-var-list" id="proVarList"></div>
+    </div>
+
+    <!-- Command editor -->
+    <div class="pane pane-cmd">
+      <div class="pane-header">
+        <span class="pane-title">Command · do-file</span>
+        <span class="pane-title" style="color: var(--accent)">⌘ Enter to run</span>
+      </div>
+      <div class="editor-mock">
+        <div><span class="ln">1</span><span class="cmt">// Phase 3: Stata syntax + autocomplete + live execution</span></div>
+        <div><span class="ln">2</span><span class="cmt">// For now this is a layout placeholder</span></div>
+        <div><span class="ln">3</span></div>
+        <div class="cur"><span class="ln">4</span><span class="kw">summarize</span> <span class="vart">plaque_index gingival_index periodontal_pocket_depth_mm</span><span class="opt">, detail</span></div>
+        <div><span class="ln">5</span></div>
+        <div><span class="ln">6</span><span class="kw">tabulate</span> <span class="vart">education_level smoking</span><span class="opt">, row chi2</span></div>
+        <div><span class="ln">7</span></div>
+        <div><span class="ln">8</span><span class="kw">regress</span> <span class="vart">plaque_index age sex brushing_freq</span><span class="opt">, vce(robust)</span></div>
+      </div>
+    </div>
+
+    <!-- Graphs -->
+    <div class="pane pane-graphs">
+      <div class="pane-header">
+        <span class="pane-title">Graphs</span>
+      </div>
+      <div class="pane-empty">
+        <span class="badge"><span class="dot"></span>Phase 5</span>
+        <div style="margin-top: 6px;">Plotly graphs land in Phase 5</div>
+        <div style="font-size: 11px; opacity: 0.7;">histograms · scatter · residuals · KM curves</div>
+      </div>
+    </div>
+
+    <!-- Results -->
+    <div class="pane pane-results">
+      <div class="pane-header">
+        <span class="pane-title">Results</span>
+      </div>
+      <div class="pane-empty">
+        <span class="badge"><span class="dot"></span>Phase 3</span>
+        <div style="margin-top: 6px;">Pro mode execution coming in Phase 3</div>
+        <div style="font-size: 11px; opacity: 0.7;">Stata-style ASCII tables stream here over WebSocket</div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<div class="floating-tip">
+  <span>Tap the toggle to flip modes —</span>
+  <kbd>Guided</kbd>
+  <span>↔</span>
+  <kbd>Pro</kbd>
+</div>
+
+<script>
+// =========== Variable cards (Guided) ===========
+const vars = [
+  { name: 'patient_id', type: 'id', n: 406, miss: 0, label: 'Unique ID', spark: [3,3,3,3,3,3,3,3,3,3,3,3] },
+  { name: 'age', type: 'numeric', n: 406, miss: 0, label: 'years', spark: [2,5,8,11,13,12,10,8,6,4,3,1] },
+  { name: 'sex', type: 'categorical', n: 406, miss: 0, label: 'M / F', spark: [12,0,0,0,0,0,11,0,0,0,0,0], categorical: true },
+  { name: 'education_level', type: 'categorical', n: 406, miss: 0, label: '4 levels', spark: [4,0,0,7,0,0,9,0,0,5,0,0], categorical: true },
+  { name: 'smoking', type: 'binary', n: 406, miss: 0, label: '0 / 1', spark: [13,0,0,0,0,0,0,0,0,0,0,4] },
+  { name: 'diabetes', type: 'binary', n: 406, miss: 0, label: '0 / 1', spark: [15,0,0,0,0,0,0,0,0,0,0,2] },
+  { name: 'brushing_freq', type: 'numeric', n: 379, miss: 27, label: 'times/day', spark: [3,0,0,8,0,0,11,0,0,7,0,0] },
+  { name: 'last_visit_months', type: 'numeric', n: 406, miss: 0, label: 'months', spark: [10,12,11,9,8,6,5,4,3,3,2,2] },
+  { name: 'plaque_index', type: 'numeric', n: 379, miss: 27, label: 'Silness–Löe', spark: [3,5,8,11,13,11,8,5,3,2,1,1], selected: true },
+  { name: 'gingival_index', type: 'numeric', n: 380, miss: 26, label: 'Löe–Silness', spark: [4,7,10,12,11,9,6,4,3,2,1,1] },
+  { name: 'periodontal_pocket_depth_mm', type: 'numeric', n: 406, miss: 0, label: 'mm', spark: [2,4,7,10,12,11,9,7,5,3,2,1] },
+  { name: 'num_decayed_teeth', type: 'numeric', n: 406, miss: 0, label: 'count', spark: [13,8,5,4,3,2,2,1,1,1,1,1] },
+  { name: 'caries', type: 'binary', n: 406, miss: 0, label: '0 / 1', spark: [9,0,0,0,0,0,0,0,0,0,0,7] },
+];
+
+const grid = document.getElementById('varGrid');
+vars.forEach(v => {
+  const card = document.createElement('div');
+  card.className = 'var-card' + (v.selected ? ' selected' : '');
+  const missClass = v.miss === 0 ? 'zero' : '';
+  const missText = v.miss === 0 ? '0 missing' : `${v.miss} miss`;
+  card.innerHTML = `
+    <div class="var-card-top">
+      <div class="var-name">${v.name}</div>
+      <div class="type-chip ${v.type}">${v.type}</div>
+    </div>
+    <div class="var-meta">
+      <span>n = ${v.n}</span>
+      <span class="miss ${missClass}">${missText}</span>
+    </div>
+    <div class="var-spark">${v.spark.map(h => `<div class="bar" style="height: ${h * 7}%;"></div>`).join('')}</div>
+  `;
+  grid.appendChild(card);
+});
+
+// =========== Histogram (right rail) — plaque_index distribution ===========
+const histBins = [3, 6, 11, 18, 28, 35, 30, 22, 14, 8, 5, 3, 2, 1, 1];
+const histEl = document.getElementById('hist');
+const max = Math.max(...histBins);
+histBins.forEach(b => {
+  const bar = document.createElement('div');
+  bar.className = 'bar';
+  bar.style.height = (b / max * 100) + '%';
+  histEl.appendChild(bar);
+});
+
+// =========== Pro mode variable list ===========
+const proList = document.getElementById('proVarList');
+vars.forEach(v => {
+  const item = document.createElement('div');
+  item.className = 'pro-var';
+  const typeShort = { numeric: 'float', binary: 'byte', categorical: 'str', id: 'long', string: 'str' }[v.type] || v.type;
+  item.innerHTML = `<span class="pname">${v.name}</span><span class="ptype">${typeShort}</span>`;
+  proList.appendChild(item);
+});
+
+// =========== Mode toggle interaction ===========
+const toggle = document.getElementById('modeToggle');
+const app = document.getElementById('app');
+toggle.querySelectorAll('button').forEach(btn => {
+  btn.addEventListener('click', () => {
+    toggle.querySelectorAll('button').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    if (btn.dataset.mode === 'pro') {
+      toggle.classList.add('pro-active');
+      app.classList.add('pro-active');
+    } else {
+      toggle.classList.remove('pro-active');
+      app.classList.remove('pro-active');
+    }
+  });
+});
+
+// =========== Card selection interaction ===========
+document.querySelectorAll('.var-card').forEach(card => {
+  card.addEventListener('click', () => {
+    document.querySelectorAll('.var-card').forEach(c => c.classList.remove('selected'));
+    card.classList.add('selected');
+  });
+});
+</script>
+
+</body>
+</html>
