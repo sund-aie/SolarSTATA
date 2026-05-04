@@ -11,17 +11,17 @@ help:
 	@echo "  make clean         - remove caches and build artifacts"
 
 dev-backend:
-	cd backend && pip install -e ".[dev]"
-	cd backend && uvicorn solarstata.main:app --reload --host 0.0.0.0 --port 8000
+	cd backend && python -m pip install -e ".[dev]"
+	cd backend && python -m uvicorn solarstata.main:app --reload --host 0.0.0.0 --port 8000
 
 test:
-	cd backend && pip install -e ".[dev]" && pytest -v
+	cd backend && python -m pip install -e ".[dev]" && python -m pytest -v
 
 gen-dataset:
 	cd backend && python -m solarstata.walkthroughs.datasets.generate
 
 lint:
-	cd backend && ruff check src tests && mypy src
+	cd backend && python -m ruff check src tests && python -m mypy src
 
 docker:
 	docker build -t solarstata:dev .
