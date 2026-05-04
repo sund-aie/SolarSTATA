@@ -1,0 +1,722 @@
+
+stata 19
+Overview
+Architecture
+Data Model
+Command Engine
+Statistics
+New in 19
+Formulas
+Use Cases
+Build a Replica
+RELEASED APRIL 2025 · VERSION 19
+Stata 19 The Complete Deep Dive
+Everything about how Stata 19 works — its internal architecture, statistical algorithms, mathematical formulas, execution pipeline, data model, and a complete guide to building a replica from scratch.
+📅 StataCorp · 1985 → 2025 🔢 19 major releases 📄 19,000 pages of documentation ⚙️ Written in C + Mata + ado
+TABLE OF CONTENTS
+	1	What is Stata? Purpose & scope
+	2	Internal architecture — the 4-layer model
+	3	Data model — variables, types, frames
+	4	Command engine — parsing & execution
+	5	Statistical methods — every major category
+	6	New in Stata 19 — H2OML, CATE, HDFE, and more
+	7	Core formulas — OLS, MLE, GMM, Bayesian, survival
+	8	Who uses it and for what
+	9	How to build a replica — stack, architecture, libraries
+SECTION 1
+What Is Stata?
+Stata (pronounced "stay-ta" or "sta-ta" — both are accepted) is a complete statistical software package developed by StataCorp, founded in 1985 in College Station, Texas. It integrates four core capabilities into a single platform: statistical analysis, data visualization, data management, and automated reporting. It is not just a stats calculator — it is a full research workflow tool.
+Stata is used by economists, epidemiologists, social scientists, biostatisticians, policy analysts, clinical researchers, and increasingly by data scientists. Its core philosophy is reproducible research — every action you take can be scripted into a do-file that someone else can run and get the exact same results.
+THE FOUR EDITIONS
+STATA/BE
+Basic
+≤2,048 variables, ≤2B obs. For coursework.
+STATA/SE
+Standard
+≤32,767 variables. For research & dissertations.
+STATA/MP
+Multiprocessor
+Parallel processing. Up to 120,000 variables. Up to 20B obs.
+STATANOW
+Continuous
+Rolling release. New features delivered as they're certified.
+All four editions use the same codebase, the same command syntax, and produce identical results. The only differences are in dataset size limits and parallel processing capability. All files (datasets, do-files, graphs) are cross-platform and cross-edition compatible.
+HIGH-LEVEL PURPOSE
+At its core, Stata answers the question: "Given data, what does the world look like?" It does this through a combination of (a) cleaning and reshaping data into analysis-ready form, (b) running statistical models with proper inference, (c) visualizing patterns, and (d) producing publication-quality output tables and graphs. Stata 19 adds machine learning on top of this traditional statistical foundation.
+SECTION 2
+Internal Architecture
+Stata has a four-layer architecture. Understanding this layering is critical if you want to replicate it — each layer has a distinct responsibility and a distinct programming language.
+THE FOUR-LAYER STACK
+Layer 4 — User Interface (GUI + CLI)
+Menu-driven interface, Command window, Results window, Do-file Editor, Variable Manager
+GUI/CLI
+Layer 3 — ado-files (Stata's scripting language)
+Most built-in commands are actually ado-files. Written in Stata's own language. Extensible by users.
+STATA LANG
+Layer 2 — Mata (matrix programming language)
+Compiled matrix language for high-performance computation. Used to implement complex estimators.
+MATA/COMPILED
+Layer 1 — C core (internal engine)
+Written in C. Data engine, memory management, numerical primitives, LAPACK/OpenBLAS for linear algebra.
+C / LAPACK
+THE C CORE
+Stata was originally written in C by William Gould starting in 1984. The C core handles everything performance-critical: loading datasets into memory, executing numerical operations, managing the in-memory data table, and interfacing with LAPACK/OpenBLAS (open-source linear algebra libraries). In Stata 19, the LAPACK/OpenBLAS integration was updated for modern hardware — particularly Apple Silicon Macs — to give faster matrix operations via hardware-optimized kernels.
+The C core exposes an internal API that ado-files and Mata can call. You never see this API as a user — it's internal. When you run regress y x, the command parser identifies the command, calls the appropriate ado-file, which calls Mata routines, which call C-level matrix operations.
+MATA — THE MATRIX LANGUAGE
+Mata is Stata's compiled matrix programming language, introduced in Stata 9. Think of it as a stripped-down MATLAB/Julia that sits inside Stata. It compiles to bytecode and runs much faster than interpreted ado-file code. Its key use is implementing the numerical guts of statistical estimators — the optimization loops, gradient computations, and numerical integration that sit below the command interface.
+// Example: OLS in Mata
+mata:
+  st_view(Y, ., "y")          // Load y from Stata dataset
+  st_view(X, ., "x1 x2 x3")   // Load X matrix
+  X = X, J(rows(X), 1, 1)    // Append constant column
+  b = invsym(X'X) * X'Y      // OLS: β = (X'X)⁻¹ X'Y
+  e = Y - X*b                 // Residuals
+  s2 = (e'e) / (rows(X)-cols(X))  // σ² = SSR/df
+  V = s2 * invsym(X'X)       // Variance-covariance matrix
+  st_matrix("b", b')         // Return to Stata
+  st_matrix("V", V)
+end
+ADO-FILES — THE EXTENSIBLE COMMAND LAYER
+Most of Stata's user-visible commands are actually ado-files — programs written in Stata's own scripting language. When you type regress, Stata finds and loads regress.ado, parses your options, and executes it. You can view the source of any ado command with viewsource regress.ado. This is why Stata is so extensible — users can submit their own commands to the SSC (Statistical Software Components) archive at Boston College, and others can install them with ssc install <command>.
+THE EXECUTION PIPELINE
+User types command
+→
+Lexer tokenizes input
+→
+Parser finds ado-file
+→
+ado-file executes
+→
+Mata/C routines run
+→
+Results stored in e()
+→
+SMCL output rendered
+SMCL — STATA MARKUP AND CONTROL LANGUAGE
+All output you see in the Results window is rendered through SMCL (pronounced "smickle"). It's Stata's proprietary output markup language — essentially like HTML but for the terminal. Tables, bold text, hyperlinks to help files, colored output — all of this is SMCL. Log files are stored as .smcl files that preserve the exact visual rendering of your session.
+MEMORY MODEL
+Stata stores the active dataset entirely in RAM. The dataset is a rectangular matrix where rows are observations and columns are variables. Until Stata 16, only one dataset could be in memory at a time. Stata 16+ introduced frames — named datasets that coexist in memory and can be linked together, similar to a lightweight relational database.
+Stata uses integer storage where possible (byte, int, long), single-precision floats (float, 4 bytes) as the default for continuous variables, and double-precision (double, 8 bytes) only when needed. This aggressive type compression keeps large datasets manageable in RAM.
+SECTION 3
+Data Model
+VARIABLE STORAGE TYPES
+TYPE
+BYTES
+RANGE / NOTES
+USE
+byte
+1
+−127 to 100
+Binary flags, small integers
+int
+2
+−32,767 to 32,740
+IDs, counts
+long
+4
+−2,147,483,647 to 2,147,483,620
+Large integer IDs
+float
+4
+~7 significant digits
+Default continuous variable
+double
+8
+~15 significant digits
+High-precision computation
+str#
+#
+Fixed-length string, up to 2,045 chars
+Short string codes
+strL
+Variable
+Unlimited length, binary blobs
+Long text, binary data
+The compress command automatically downcasts each variable to the smallest type that preserves all information. A variable with only values 0 and 1 stored as double (8 bytes) gets compressed to byte (1 byte) — an 8× memory saving.
+VALUE LABELS
+Stata uses a two-layer system for categorical data. The variable stores a numeric code (e.g., 1, 2, 3) and a separate value label dictionary maps codes to strings (1 = "Male", 2 = "Female", 3 = "Other"). This means you see human-readable labels in output while the data stays numeric for computation — efficient and flexible.
+MISSING DATA
+Stata has 27 distinct missing value types: . (the standard missing) and .a through .z for 26 user-defined categories. This lets you encode why data is missing — refusal, not applicable, unknown — without losing the information. Missing values are treated as positive infinity in comparisons (so . > 100 is true), which can cause subtle bugs if you're not careful.
+FRAMES (MULTI-DATASET MEMORY)
+Introduced in Stata 16 and matured in 17-19, frames allow multiple datasets to coexist in memory simultaneously. You switch between them with frame change and link them with frlink. This enables relational data workflows — for example, a patient-level frame and a hospital-level frame linked by hospital ID, allowing you to merge variables across frames without creating a large merged dataset.
+// Multi-frame workflow example
+frame create hospitals
+frame change hospitals
+use "hospitals.dta", clear
+
+frame change default
+use "patients.dta", clear
+frlink m:1 hospital_id, frame(hospitals)   // Link the frames
+frget hospital_type = type, from(hospitals)  // Pull a variable across
+FACTOR VARIABLES & INTERACTION NOTATION
+Stata's factor variable notation (introduced in Stata 11) is one of its most powerful features. Instead of manually creating dummies, you prefix a variable with i. to tell Stata it's categorical. Stata then automatically creates all dummy variables during estimation, reports them sensibly, and handles them correctly in postestimation commands like margins.
+// i. for categorical, c. for continuous, ## for full interaction
+regress wage i.education c.experience##c.experience i.education#c.experience
+SECTION 4
+Command Engine & Syntax
+THE UNIVERSAL SYNTAX RULE
+Every Stata command follows the same grammar. This is by design — once you learn the pattern, you can use any command intuitively:
+UNIVERSAL STATA COMMAND GRAMMAR
+[by varlist:] command [varlist] [=exp] [if exp] [in range] [weight] [using filename] [, options]
+The [by varlist:] prefix runs the command separately for each group. The if qualifier restricts which observations are used. The in range qualifier selects specific row numbers. The weight applies sampling or analytical weights. Options after the comma control the behavior of the specific command.
+PREFIX COMMANDS
+Stata's prefix commands are a composable layer on top of any estimation command. They modify how the command is applied without changing the command's own syntax. The most important ones are:
+PREFIX
+WHAT IT DOES
+EXAMPLE
+by
+Repeats command for each group
+by sex: summarize age
+bysort
+Sorts then repeats
+bysort country: regress y x
+xi
+Expands interactions (legacy, use i. instead)
+xi: regress y i.group
+quietly
+Suppresses output
+quietly regress y x
+capture
+Suppresses errors
+capture drop temp*
+bootstrap
+Bootstrap std errors for any estimator
+bootstrap _b: regress y x
+jackknife
+Jackknife std errors
+jackknife: logit y x
+svy
+Survey-weighted estimation
+svy: regress y x
+mi estimate
+Multiple imputation combination
+mi estimate: logit y x
+simulate
+Monte Carlo simulation
+simulate mean=r(mean), reps(1000): ...
+POSTESTIMATION — AFTER YOU ESTIMATE
+Every estimation command in Stata leaves results in the e() namespace. These include the coefficient vector e(b), variance-covariance matrix e(V), sample size e(N), and many more. Postestimation commands then use these stored results to compute further quantities. This is the "estimate once, interrogate many times" workflow.
+// Estimation followed by postestimation
+regress wage education experience i.industry   // Estimate
+
+// Postestimation commands
+predict yhat                    // Fitted values → new variable
+predict resid, resid            // Residuals
+margins i.industry              // Marginal effects of industry
+margins, dydx(education)        // dy/dx for education
+marginsplot                     // Graph the margins
+lincom education + experience   // Linear combination test
+nlcom exp(education)            // Nonlinear combo test
+test education = experience     // Wald test
+estat vif                       // Variance inflation factors
+estat ic                        // AIC/BIC
+rvfplot                         // Residuals vs fitted plot
+MACROS — STATA'S VARIABLES FOR CODE
+Stata has two types of macros: local (only exist within a do-file/program) and global (persist across all code in the session). They store text and are expanded inline before execution.
+local controls "education experience i.industry"
+local depvars "wage hours"
+
+foreach dv of local depvars {
+    regress `dv' `controls'
+    estimates store model_`dv'
+}
+
+esttab model_wage model_hours, se star  // Compare models in one table
+SECTION 5
+Statistical Methods — Every Major Category
+This is the heart of what Stata does. Below is every major statistical category, what commands Stata provides, and the estimation strategy behind each one.
+1. LINEAR REGRESSION & OLS
+The workhorse of quantitative research. regress y x1 x2 fits the model y = Xβ + ε by minimizing the sum of squared residuals using the analytic formula β̂ = (X'X)⁻¹ X'y. Stata uses numerically stable QR decomposition rather than directly inverting X'X to avoid precision issues with collinear data.
+Standard errors are computed using the sandwich estimator family. The vce(robust) option gives Huber-White heteroskedasticity-robust SEs. vce(cluster id) gives cluster-robust SEs. vce(hac) gives heteroskedasticity and autocorrelation-consistent (HAC) SEs using the Newey-West estimator. Stata 19 adds Driscoll-Kraay SEs for panel data and HC3 bias-corrected SEs with the Hansen inference adjustment.
+2. GENERALIZED LINEAR MODELS (GLM)
+The glm command fits GLMs via iteratively reweighted least squares (IRLS). You specify a family (Gaussian, Binomial, Poisson, Gamma, etc.) and a link function (identity, logit, log, probit, etc.). IRLS iteratively solves a weighted least squares problem at each step: β̂ⁿᵉʷ = (X'WX)⁻¹ X'Wz, where W is a diagonal weight matrix and z is the adjusted dependent variable, until convergence.
+3. MAXIMUM LIKELIHOOD ESTIMATION (MLE)
+MLE is the foundation of most non-linear models in Stata: logistic regression, probit, tobit, ordered logit, multinomial logit, Poisson, negative binomial, survival models, and hundreds more. The principle: find parameters θ that maximize the log-likelihood function ℓ(θ; data).
+Stata uses the Newton-Raphson algorithm (and variants like BHHH, DFP, BFGS) for optimization. Newton-Raphson updates: θ̂ⁿᵉʷ = θ̂ - [H(θ̂)]⁻¹ g(θ̂), where H is the Hessian (matrix of second derivatives of ℓ) and g is the gradient (vector of first derivatives). The standard errors come from the inverse of the negative expected Hessian (Fisher information): Var(θ̂) = [-E(∂²ℓ/∂θ∂θ')]⁻¹.
+// MLE examples
+logit y x1 x2, vce(robust)        // Binary logistic
+probit y x1 x2                       // Probit
+ologit y x1 x2                       // Ordered logistic
+mlogit y x1 x2, baseoutcome(1)     // Multinomial logit
+tobit y x1 x2, ll(0)               // Tobit (censored regression)
+heckman y x1, select(z1 z2)         // Heckman selection model
+poisson count x1 x2                  // Poisson regression
+nbreg count x1 x2                    // Negative binomial
+4. PANEL DATA (LONGITUDINAL) MODELS
+Panel data has observations on the same units over time. The key commands are xtreg (linear panel models), xtlogit, xtprobit, etc.
+Fixed Effects (FE): Controls for all time-invariant unit-level characteristics by demeaning the data. The within estimator solves: β̂_FE = (X̃'X̃)⁻¹ X̃'ỹ, where X̃ = X - X̄ᵢ (demeaned variables). The FE estimator is consistent even if unobserved unit effects are correlated with regressors, but it cannot estimate coefficients for time-invariant variables.
+Random Effects (RE): Assumes unobserved effects are uncorrelated with regressors. Uses Generalized Least Squares (GLS): β̂_RE = (X'Ω⁻¹X)⁻¹ X'Ω⁻¹y, where Ω is the variance-covariance structure of the compound error term.
+Hausman Test: Tests whether FE and RE estimates differ significantly. If they do, FE is preferred (RE is inconsistent). The Mundlak specification test (new in Stata 18-19) is a more flexible alternative that works with cluster-robust and bootstrap SEs.
+High-Dimensional Fixed Effects (HDFE): New in Stata 19. Traditional FE absorbs one categorical variable (e.g., unit fixed effects). HDFE absorbs multiple high-dimensional categorical variables simultaneously (e.g., firm × year × industry fixed effects) using the alternating projections algorithm. This gives enormous speed gains over naive dummy variable approaches.
+5. INSTRUMENTAL VARIABLES (IV)
+When regressors are endogenous (correlated with the error term), OLS is biased. IV estimation uses external instruments z that affect the endogenous regressor but not the outcome directly.
+Two-Stage Least Squares (2SLS): Stage 1 regresses the endogenous variable on instruments: x̂ = Zπ. Stage 2 regresses outcome on the predicted values: β̂_2SLS = (X̂'X)⁻¹X̂'y. The variance formula accounts for the two-stage structure.
+Stata 19 adds robust inference tests for weak instruments (tests that remain valid even when instruments are only weakly correlated with the endogenous regressor), and SVAR models identified via instrumental variables.
+6. SURVIVAL ANALYSIS (TIME-TO-EVENT)
+Survival analysis models the time until an event occurs (death, failure, job loss, etc.) and handles censored observations (where the event hasn't happened yet by end of study).
+Cox Proportional Hazards: stcox x1 x2. The hazard function is h(t|x) = h₀(t) · exp(xβ), where h₀(t) is an unspecified baseline hazard. Cox partial likelihood avoids estimating h₀(t) directly. The partial likelihood at each event time tⱼ is: L_partial = Π [exp(xⱼβ) / Σᵢ∈R(tⱼ) exp(xᵢβ)], where R(tⱼ) is the risk set (all subjects still at risk at time tⱼ).
+Parametric Survival: streg fits Weibull, exponential, log-normal, log-logistic, Gompertz, and generalized gamma accelerated failure-time models via MLE. Stata 19 adds the marginal Cox PH model for interval-censored multiple-event data.
+7. STRUCTURAL EQUATION MODELING (SEM)
+sem and gsem fit systems of equations with latent variables. SEM handles mediation, moderation, confirmatory factor analysis, and complex path models. The estimator is maximum likelihood under multivariate normality, using the fit function: F = tr(SΣ⁻¹) + log|Σ| - log|S| - p, where S is the sample covariance matrix and Σ(θ) is the model-implied covariance matrix.
+8. TIME SERIES
+Stata has a rich time series toolkit. Key commands: arima (ARIMA/ARIMAX), var (Vector Autoregression), vec (VECM for cointegrated series), arch/garch (volatility models). Stata 19 adds panel VAR and SVAR models estimated via instrumental variables.
+VAR models: each variable is regressed on p lags of all variables in the system. The model yₜ = A₁yₜ₋₁ + ... + Aₚyₜ₋ₚ + εₜ is estimated equation-by-equation with OLS (which is efficient when the errors across equations are uncorrelated) or by GLS/MLE when they're not.
+9. BAYESIAN STATISTICS
+The bayes: prefix and bayesmh command implement Bayesian estimation via Markov Chain Monte Carlo (MCMC). Stata uses the Metropolis-Hastings algorithm and Gibbs sampler to draw from the posterior distribution p(θ|data) ∝ L(data|θ) · π(θ).
+New in Stata 19: Bayesian variable selection for linear regression using spike-and-slab priors. Each coefficient gets a mixture prior — a spike (point mass at zero) with probability 1-π and a diffuse slab with probability π. The MCMC samples which variables are "in" or "out" of the model, averaging over model uncertainty. Bayesian quantile regression uses the asymmetric Laplace likelihood — the τ-th quantile regression corresponds to the MLE of an asymmetric Laplace distribution with skewness parameter τ. Bayesian bootstrap resampling provides a nonparametric Bayesian alternative to the classical bootstrap.
+10. TREATMENT EFFECTS & CAUSAL INFERENCE
+The teffects suite estimates Average Treatment Effects (ATE), Average Treatment Effects on the Treated (ATT), and Potential Outcome Means (POM) via regression adjustment, IPW, IPWRA, propensity score matching, and nearest-neighbor matching.
+New in Stata 19: Conditional Average Treatment Effects (CATE) via the cate command. CATE estimates how treatment effects vary across individuals based on covariates, going beyond a single aggregate ATE. Stata 19 uses meta-learners (S-learner, T-learner, X-learner) that decompose the CATE estimation into base learner fits.
+Also new: Difference-in-Differences (DiD) with heterogeneous treatment effects via didregress and xtdidregress, and Local Average Treatment Effects (LATE) estimation for compliers in IV settings.
+11. META-ANALYSIS
+meta commands fit fixed-effect and random-effects meta-analysis models for two-sample means, proportions, odds ratios, risk ratios, and (new in Stata 19) correlations. Random-effects meta-analysis uses the DerSimonian-Laird (or REML) estimator for the between-study variance τ². Forest plots, funnel plots, and Egger's test for publication bias are all built in.
+12. SURVEY DATA ANALYSIS
+The svy: prefix applies to any estimation command and accounts for complex survey design: stratification, clustering, probability weights, finite population correction. Variance estimation uses Taylor series linearization or jackknife/bootstrap replication methods. The design effect (DEFF) quantifies the variance inflation from the complex design relative to simple random sampling.
+13. MULTIPLE IMPUTATION
+mi impute handles missing data by creating M imputed datasets. Stata supports univariate imputation (normal, logit, predictive mean matching, truncated, interval-censored) and multivariate imputation (chained equations — MICE). After imputation, mi estimate: runs any Stata command on all M datasets and combines results using Rubin's rules: the point estimate is the average across imputations, and the variance combines within-imputation and between-imputation variance.
+14. LATENT CLASS ANALYSIS
+fmm (finite mixture models) and lclogit estimate models where observations belong to unobserved subgroups (classes). The EM algorithm iterates between computing the probability each observation belongs to each class (E-step) and maximizing the likelihood within each class (M-step). Stata 19 improves latent class model comparison statistics to more easily select the number of latent classes.
+15. POWER ANALYSIS & SAMPLE SIZE
+The power command computes power (1 - β, probability of detecting a true effect), sample size n, and minimum detectable effect size for a wide range of tests: one-sample and two-sample means, proportions, correlations, linear regression, ANOVA, chi-squared, survival, and (new in Stata 19) logistic regression.
+SECTION 6
+New in Stata 19
+RELEASE DATE
+Stata 19 was released on April 8, 2025. StataCorp's 40th anniversary. It builds on StataNow's rolling feature releases and is the biggest update since Stata 16 (frames) and Stata 17 (stochastic SEM).
+MACHINE LEARNING VIA H2OML NEW
+Stata 19 integrates H2O.ai's open-source machine learning library through a new h2oml suite of commands. This is the biggest new capability class — ML algorithms have never been first-class citizens in Stata before. Two ensemble methods are supported:
+Gradient Boosting Machine (GBM): h2oml gbm. Builds an ensemble of decision trees sequentially, each tree fitted to the residuals of all previous trees. Uses gradient descent in function space. The update formula at step m is: F_m(x) = F_{m-1}(x) + η · h_m(x), where h_m is the tree that best fits the negative gradient of the loss function (residuals for squared loss, pseudo-residuals for other losses), and η is the learning rate.
+Random Forest: h2oml randomforest. Builds B decision trees on bootstrap samples of the data. At each node, only a random subset of √p predictors is considered for the split. Predictions are averaged (regression) or majority-voted (classification) across all trees. The randomness decorrelates the trees, reducing variance without increasing bias.
+Postestimation for H2OML (added in later Stata 19 updates): h2omlgraph permimp graphs permutation variable importance — how much model performance drops when each predictor's values are randomly shuffled. Diagnostic plots (residuals vs fitted, residuals vs predictor) are also available.
+CONDITIONAL AVERAGE TREATMENT EFFECTS (CATE) NEW
+The new cate command estimates how treatment effects vary across the covariate distribution — going beyond a single ATE to understand who benefits most from a treatment. Three meta-learner strategies are supported: S-learner (single model for treated and control), T-learner (separate models for each arm), and X-learner (cross-fitted residuals for efficiency in unbalanced designs). All three can use any base learner supported by the H2OML suite.
+HIGH-DIMENSIONAL FIXED EFFECTS (HDFE) NEW
+Traditional panel regressions absorb one set of fixed effects (e.g., firm FE or time FE but not both simultaneously in large datasets). HDFE absorbs multiple interacted fixed effects — firm × year × product category — using the alternating projections (Frisch-Waugh-Lovell) algorithm. This is orders of magnitude faster than creating actual dummy variables. The command now also accepts factor variable interactions in the absorb() option.
+BAYESIAN VARIABLE SELECTION NEW
+bayes, vselect: regress implements stochastic search variable selection for linear regression. Spike-and-slab priors allow the MCMC to explore which subset of variables belongs in the model. The output reports posterior inclusion probabilities (PIPs) for each variable — the proportion of MCMC iterations where that variable was "selected." PIPs above 0.5 are typically considered strong evidence for inclusion.
+CORRELATED RANDOM EFFECTS (CRE) NEW
+The Mundlak/Chamberlain CRE approach allows consistent estimation even when unobserved effects are correlated with regressors, while still being able to estimate time-invariant variable effects (unlike FE). Implemented by adding the within-unit means of all time-varying regressors as additional controls. The Mundlak specification test (in Stata 18/19) helps choose between RE and CRE/FE.
+GRAPHICAL ENHANCEMENTS NEW
+Stata 19 adds heat maps, bar graphs with confidence intervals, spike and capped-spike range plots, and improved control over box groupings. Variables can now map to the color of lines and markers within a single graph — creating continuous color gradients tied to data values.
+ENHANCED TABLES & REPORTING NEW
+The collect, etable, dtable, table, and lcstats commands now allow one-line table creation with immediate export to Word, Excel, LaTeX, HTML, and PDF. The Word conversion pipeline is also expanded — Stata can now convert Word documents to HTML, EPUB, and other formats.
+PYSTATA ENHANCEMENTS NEW
+PyStata (Stata embedded in Python / Python embedded in Stata) gets Tab-autocomplete for Stata variable names, macro names, and results when running inside Jupyter Notebooks or JupyterLab. New functions move data directly between Stata frames and Python NumPy arrays and pandas DataFrames without any intermediate file I/O.
+MATA ENHANCEMENTS NEW
+New Mata additions: least-squares solvers (more numerically stable than the general-purpose solver), improved numerical derivative classes (DerivDiscreteDiff() and DerivDiscretePartial() for finite difference approximation), and improved matrix inverse methods. The LAPACK/OpenBLAS backend is updated for better performance on Apple Silicon Macs.
+PANEL VAR NEW
+xtvar estimates Vector Autoregression models for panel data, allowing cross-sectional heterogeneity in VAR dynamics. Impulse response functions and forecast error variance decompositions account for the panel structure. SVAR models identified via instrumental variables are also new.
+INSTRUMENTAL VARIABLES FOR LOCAL PROJECTIONS NEW
+Local projection IRFs (Jordà method) now support instrumental variables to handle endogeneity in the treatment variable. This combines the flexibility of the Jordà local projection approach with the identification strategy of IV, producing LATE-identified dynamic causal effects.
+SECTION 7
+Core Formulas — How Stata Computes What It Computes
+OLS — ORDINARY LEAST SQUARES
+OLS ESTIMATOR
+β̂ = (X'X)⁻¹ X'y
+
+Stata implementation: QR decomposition, not direct matrix inversion.
+X = QR where Q is orthonormal, R is upper triangular
+β̂ = R⁻¹ Q'y (more numerically stable)
+VARIANCE-COVARIANCE (HOMOSKEDASTIC)
+Var(β̂) = σ² (X'X)⁻¹ where σ² = SSR / (n - k)
+HUBER-WHITE ROBUST (HC1) — VCE(ROBUST)
+Var(β̂)_robust = (X'X)⁻¹ [Σᵢ eᵢ² xᵢxᵢ'] (X'X)⁻¹
+
+where eᵢ = yᵢ - xᵢβ̂ are residuals.
+HC3 version (Stata 19): eᵢ² replaced by eᵢ²/(1 - hᵢᵢ)² where hᵢᵢ = xᵢ'(X'X)⁻¹xᵢ is leverage.
+CLUSTER-ROBUST — VCE(CLUSTER ID)
+Var(β̂)_cluster = (n/(n-k)) × (G/(G-1)) × (X'X)⁻¹ [Σⱼ (Σᵢ∈Cⱼ eᵢxᵢ)(Σᵢ∈Cⱼ eᵢxᵢ)'] (X'X)⁻¹
+
+where G = number of clusters, Cⱼ = set of observations in cluster j.
+LOGISTIC REGRESSION — LOG-LIKELIHOOD
+LOGIT LOG-LIKELIHOOD
+ℓ(β) = Σᵢ [yᵢ log(Λ(xᵢβ)) + (1-yᵢ) log(1 - Λ(xᵢβ))]
+
+where Λ(z) = eᶻ/(1 + eᶻ) (logistic function)
+
+Score: ∂ℓ/∂β = Σᵢ xᵢ(yᵢ - Λ(xᵢβ))
+Hessian: ∂²ℓ/∂β∂β' = -Σᵢ xᵢxᵢ' Λ(xᵢβ)(1 - Λ(xᵢβ))
+
+Newton-Raphson: β̂ⁿᵉʷ = β̂ - H⁻¹g (iterate until convergence)
+POISSON REGRESSION
+POISSON LOG-LIKELIHOOD
+ℓ(β) = Σᵢ [yᵢ(xᵢβ) - exp(xᵢβ) - log(yᵢ!)]
+
+E[yᵢ|xᵢ] = exp(xᵢβ) (the count is log-linked to the linear predictor)
+COX PROPORTIONAL HAZARDS — PARTIAL LIKELIHOOD
+COX PARTIAL LOG-LIKELIHOOD
+ℓ(β) = Σⱼ [xⱼβ - log(Σᵢ∈R(tⱼ) exp(xᵢβ))]
+
+where the sum is over all event times tⱼ, and R(tⱼ) is the risk set at time tⱼ.
+Ties handled by Breslow, Efron (default), or exact methods.
+TWO-STAGE LEAST SQUARES (2SLS)
+2SLS ESTIMATOR
+Stage 1: X̂ = Z(Z'Z)⁻¹Z'X (project X onto instrument space)
+Stage 2: β̂_2SLS = (X̂'X)⁻¹X̂'y
+
+Equivalent to: β̂_2SLS = (X'Pz X)⁻¹ X'Pz y
+where Pz = Z(Z'Z)⁻¹Z' is the projection matrix onto the column space of Z.
+GMM — GENERALIZED METHOD OF MOMENTS
+GMM ESTIMATOR (IVREGRESS GMM)
+β̂_GMM = arg min [g(β)' W g(β)]
+
+where g(β) = (1/n) Z'(y - Xβ) are the moment conditions,
+and W is the weighting matrix.
+
+Efficient GMM: W = [Var(g(β))]⁻¹ (inverse of the variance of moments)
+PANEL FIXED EFFECTS — WITHIN ESTIMATOR
+FE WITHIN ESTIMATOR
+ỹᵢₜ = yᵢₜ - ȳᵢ (within-unit demeaning)
+x̃ᵢₜ = xᵢₜ - x̄ᵢ
+
+β̂_FE = (Σᵢ Σₜ x̃ᵢₜ x̃ᵢₜ')⁻¹ (Σᵢ Σₜ x̃ᵢₜ ỹᵢₜ)
+
+Equivalent to including a dummy variable for each unit (LSDV estimator).
+GRADIENT BOOSTING — GBM ALGORITHM
+GBM UPDATE RULE (H2OML IN STATA 19)
+Initialize: F₀(x) = arg min Σᵢ L(yᵢ, c) (constant prediction)
+
+For m = 1 to M:
+rᵢₘ = -[∂L(yᵢ, F(xᵢ)) / ∂F(xᵢ)]|F=Fₘ₋₁ (pseudo-residuals)
+hₘ = tree fitted to {xᵢ, rᵢₘ}ₙᵢ₌₁
+γⱼₘ = arg min Σᵢ∈Rⱼₘ L(yᵢ, Fₘ₋₁(xᵢ) + γ) (leaf values)
+Fₘ(x) = Fₘ₋₁(x) + η Σⱼ γⱼₘ 1[x∈Rⱼₘ] (update with learning rate η)
+BAYESIAN POSTERIOR (MCMC)
+BAYES' THEOREM FOR STATISTICAL INFERENCE
+p(θ|data) ∝ L(data|θ) × π(θ)
+
+posterior ∝ likelihood × prior
+
+Metropolis-Hastings step:
+Propose θ* ~ q(θ*|θ_t) (proposal distribution)
+Accept with probability α = min(1, [p(θ*|data) q(θt|θ*)] / [p(θt|data) q(θ*|θt)])
+θ_{t+1} = θ* if accepted, else θ_t
+MARGINS — MARGINAL EFFECTS
+AVERAGE MARGINAL EFFECT (AME)
+AME_k = (1/n) Σᵢ ∂E[y|x]/∂xₖ |xᵢ
+
+For linear: AME_k = β̂_k (same for everyone)
+
+For logit: AME_k = β̂_k × (1/n) Σᵢ Λ(xᵢβ̂)(1 - Λ(xᵢβ̂))
+
+Standard errors via delta method: Var(AME) = (∂AME/∂β)' V(β̂) (∂AME/∂β)
+SECTION 8
+Who Uses Stata and For What
+ECONOMICS
+Primary tool
+IV, DiD, RD design, panel models, wage equations, policy evaluation
+EPIDEMIOLOGY
+Dominant
+Survival analysis, cohort studies, case-control, meta-analysis, survey data
+SOCIAL SCIENCE
+Very common
+Logistic regression, SEM, multilevel models, survey analysis
+FINANCE
+Common
+ARCH/GARCH, panel data, factor models, event studies
+CLINICAL RESEARCH
+Growing
+RCT analysis, survival, mixed effects, missing data, regulatory reporting
+PUBLIC POLICY
+Standard
+Program evaluation, treatment effects, survey-weighted estimates
+REPRODUCIBILITY WORKFLOW
+The gold-standard Stata workflow for reproducible research is: (1) a master.do that calls all other do-files in sequence, (2) separate do-files for data cleaning, variable construction, and analysis, (3) all paths set relative to a root using global macros, (4) a log using analysis.log that records every command and output, and (5) a datasignature to fingerprint the raw data so anyone rerunning the code can verify they have the exact same source data.
+SECTION 9
+How to Build a Stata Replica
+IMPORTANT CONTEXT
+Stata has 40 years of development, 19,000 pages of documentation, and hundreds of developer-years of effort. A full replica is not realistic. But a functional statistical workbench covering Stata's most-used 80% of features absolutely is. Here's exactly how.
+CORE ARCHITECTURE DECISIONS
+The most important decision is your data engine. Stata's speed comes from keeping data in RAM as a flat rectangular array in C. For a Python replica, pandas + NumPy gives you this same in-memory column-store foundation. For a web app, consider DuckDB (embedded analytical database, extremely fast, runs in-browser via WASM).
+LAYER 1 — DATA ENGINE
+DuckDB / pandas
+In-memory columnar storage, SQL-compatible queries, arrow format
+LAYER 2 — STATISTICS
+statsmodels / scipy
+OLS, GLM, MLE, survival, panel, time series, with Stata-compatible output
+LAYER 3 — ML
+scikit-learn / H2O.ai
+GBM, random forest, CATE meta-learners, feature importance
+LAYER 4 — UI
+React + Monaco Editor
+Command line with syntax highlighting, output pane, variable browser
+PYTHON STACK (FOR A DESKTOP / FLASK APP LIKE SOLARSTATA)
+STATA FEATURE
+PYTHON EQUIVALENT
+LIBRARY
+OLS (regress)
+OLS with robust/cluster SE
+statsmodels.OLS
+Logit/Probit
+Logit, Probit
+statsmodels.Logit
+GLM
+Generalized Linear Models
+statsmodels.GLM
+Cox regression (stcox)
+Cox PH model
+lifelines.CoxPHFitter
+Kaplan-Meier (sts graph)
+KM estimator
+lifelines.KaplanMeierFitter
+Panel FE (xtreg, fe)
+Within estimator
+linearmodels.PanelOLS
+IV / 2SLS (ivregress)
+2SLS
+linearmodels.IV2SLS
+Random Forest (h2oml)
+Random Forest
+sklearn.ensemble.RandomForestClassifier
+GBM (h2oml gbm)
+Gradient Boosting
+sklearn.ensemble.GradientBoostingRegressor or xgboost
+MCMC (bayes:)
+MCMC sampling
+pymc or stan
+Meta-analysis
+Fixed/random effects MA
+pymare
+Multiple imputation
+MICE
+sklearn.impute.IterativeImputer
+Margins (margins)
+Average marginal effects
+statsmodels.get_margeff()
+Tables (esttab)
+Regression tables
+stargazer or great_tables
+Graphics (twoway)
+Publication plots
+matplotlib + seaborn
+Data management
+DataFrame operations
+pandas
+Mata matrices
+Matrix operations
+numpy
+COMMAND INTERPRETER ARCHITECTURE
+The most technically interesting part of replicating Stata is the command interpreter. You need a parser that reads a string like regress wage education i.industry if age>25, vce(robust) and dispatches it to the right function with the right arguments. Here's how to architect it:
+# Command parser skeleton (Python)
+import re
+from dataclasses import dataclass
+from typing import Optional, List, Dict
+
+@dataclass
+class ParsedCommand:
+    prefix: Optional[str]        # by, quietly, svy, bootstrap
+    command: str                 # regress, logit, stcox, etc.
+    depvar: Optional[str]        # First variable = dependent
+    indepvars: List[str]         # Remaining variables
+    if_condition: Optional[str]  # Condition after "if"
+    in_range: Optional[str]      # Range after "in"
+    using: Optional[str]         # File after "using"
+    options: Dict[str, str]      # Options after ","
+
+class StataCommandParser:
+    def parse(self, cmd_string: str) -> ParsedCommand:
+        # 1. Strip and split on "if", "in", "using", ","
+        # 2. Handle factor notation: i.var, c.var, ibn.var, #
+        # 3. Identify prefix commands (by, bysort, svy, quietly...)
+        # 4. Look up command in dispatch table
+        # 5. Return structured ParsedCommand object
+        ...
+
+    def execute(self, cmd: ParsedCommand, data: pd.DataFrame):
+        dispatch = {
+            'regress':  self._regress,
+            'logit':    self._logit,
+            'stcox':    self._stcox,
+            'xtreg':    self._xtreg,
+            'summarize': self._summarize,
+            'tabulate': self._tabulate,
+            ...
+        }
+        handler = dispatch.get(cmd.command)
+        if not handler:
+            raise ValueError(f"Unrecognized command: {cmd.command}")
+        # Apply if condition filter to data before passing
+        filtered_data = data.query(cmd.if_condition) if cmd.if_condition else data
+        return handler(cmd, filtered_data)
+FACTOR VARIABLE EXPANSION
+The factor variable notation is tricky to implement but essential. Before running any regression, you need a preprocessing step that expands i.industry into dummy columns, handles c.x##c.z interaction terms, and respects the reference category.
+def expand_factor_variables(varlist: List[str], df: pd.DataFrame):
+    """
+    Convert Stata-style factor notation to an expanded design matrix.
+    i.x    → drop first category dummies (sets reference)
+    ibn.x  → include all categories (no reference dropped)
+    c.x    → treat x as continuous
+    i.x#c.z → interaction: dummy × continuous
+    i.x##i.y → full factorial: main effects + all interactions
+    """
+    X_cols = []
+    for var in varlist:
+        if var.startswith('i.'):
+            colname = var[2:]
+            dummies = pd.get_dummies(df[colname], prefix=colname, drop_first=True)
+            X_cols.append(dummies)
+        elif '##' in var:
+            # Full factorial interaction — expand recursively
+            parts = var.split('##')
+            # ... handle each part and create interaction columns
+            ...
+        else:
+            X_cols.append(df[[var]])  # Plain continuous variable
+    return pd.concat(X_cols, axis=1)
+THE E() RESULTS STORE
+After each estimation, Stata stores results in e(). Your replica needs an equivalent "results store" that persists after each command and can be queried by postestimation commands.
+class ResultsStore:
+    """Mimics Stata's e() namespace"""
+    def __init__(self):
+        self.b = None          # Coefficient vector
+        self.V = None          # VCE matrix
+        self.N = None          # Observations used
+        self.df_m = None       # Model degrees of freedom
+        self.df_r = None       # Residual degrees of freedom
+        self.r2 = None         # R-squared
+        self.r2_a = None       # Adjusted R-squared
+        self.ll = None         # Log-likelihood
+        self.aic = None        # AIC
+        self.bic = None        # BIC
+        self.cmd = None        # Command that produced results
+        self.depvar = None     # Dependent variable name
+        self.indepvars = None  # Independent variable names
+        self.predict_data = None # Data needed for predictions
+        self.model_object = None # The underlying model object
+OUTPUT FORMATTING
+Stata's output tables are instantly recognizable. To replicate them, build a table renderer that takes your results store and produces formatted ASCII/HTML output with the coefficients, standard errors, t-statistics, p-values, and confidence intervals aligned in Stata's style.
+def format_regression_output(results: ResultsStore) -> str:
+    lines = []
+    lines.append(f"Number of obs  = {results.N:>10,d}")
+    lines.append(f"F({results.df_m}, {results.df_r}) = {results.F:>10.2f}")
+    lines.append(f"Prob > F       = {results.pF:>10.4f}")
+    lines.append(f"R-squared      = {results.r2:>10.4f}")
+    lines.append(f"Adj R-squared  = {results.r2_a:>10.4f}")
+    lines.append(f"Root MSE       = {results.rmse:>10.4f}")
+    lines.append("-" * 78)
+    lines.append(f"{'Variable':<15} {'Coef.':>10} {'Std. Err.':>10} {'t':>8} {'P>|t|':>8} {'[95% Conf.':>12} {'Interval]':>10}")
+    lines.append("-" * 78)
+    for name, coef, se, t, p, ci_low, ci_high in zip(
+        results.indepvars, results.b, results.se,
+        results.t, results.pval, results.ci_low, results.ci_high):
+        lines.append(f"{name:<15} {coef:>10.4f} {se:>10.4f} {t:>8.2f} {p:>8.3f} {ci_low:>12.4f} {ci_high:>10.4f}")
+    return "\n".join(lines)
+WEB APP ARCHITECTURE (FULL STACK)
+COMPONENT
+TECHNOLOGY
+ROLE
+Frontend shell
+React + Tailwind
+4-pane layout: Variables, Command, Results, Graphs
+Command editor
+Monaco Editor
+Stata syntax highlighting, autocomplete
+Backend API
+FastAPI (Python)
+Receives commands, runs stats, returns JSON
+Data engine
+DuckDB (in-process)
+Stores datasets, handles reshaping, merges
+Statistics
+statsmodels + linearmodels
+OLS, GLM, panel, IV, survival models
+ML layer
+scikit-learn + h2o
+Random forest, GBM, CATE
+Graphing
+Plotly (JSON → React)
+Scatter, histogram, survival curves, heat maps
+Tables
+Custom renderer
+Stata-style regression tables as HTML
+Session state
+Redis or in-memory dict
+Stores e(), last dataset, log history
+File I/O
+pyreadstat
+Read/write .dta files (Stata format)
+Data import
+pandas + pyarrow
+CSV, Excel, Parquet, JSON, Stata .dta
+READING STATA .DTA FILES
+import pyreadstat
+
+# Read a Stata .dta file with full metadata (value labels, variable labels)
+df, meta = pyreadstat.read_dta("dataset.dta")
+
+# meta contains:
+# meta.column_names     → list of variable names
+# meta.column_labels    → dict of variable labels
+# meta.variable_value_labels → dict of value labels
+# meta.missing_ranges   → Stata extended missing codes
+# meta.original_types   → Stata storage types (byte, int, long, float, double)
+
+# Write back to .dta
+pyreadstat.write_dta(df, "output.dta", variable_value_labels=meta.variable_value_labels)
+IMPLEMENTING THE MARGINS COMMAND
+The margins command is one of Stata's most powerful postestimation features. It computes Average Marginal Effects (AME) using the delta method for standard errors. Here is a simplified implementation for logistic regression:
+import numpy as np
+from scipy.stats import norm
+
+def average_marginal_effects_logit(model, data, varname):
+    """
+    Compute AME for a variable in a logit model.
+    Uses the delta method for standard errors.
+    """
+    X = data.values
+    beta = model.params.values
+    
+    # Linear predictor
+    xb = X @ beta
+    
+    # Logistic PDF evaluated at each observation
+    Lambda = 1 / (1 + np.exp(-xb))
+    lambda_pdf = Lambda * (1 - Lambda)  # dΛ/d(xβ) = Λ(1-Λ)
+    
+    # Index of the variable of interest
+    k = list(data.columns).index(varname)
+    beta_k = beta[k]
+    
+    # AME = average of (β_k × Λ(1-Λ)) across all observations
+    ame = np.mean(beta_k * lambda_pdf)
+    
+    # Delta method gradient: ∂AME/∂β
+    # (requires full gradient including cross-terms)
+    n = len(data)
+    grad = np.zeros(len(beta))
+    for j in range(len(beta)):
+        if j == k:
+            grad[j] = np.mean(lambda_pdf * (1 - 2*Lambda) * beta_k * X[:, j] + lambda_pdf)
+        else:
+            grad[j] = np.mean(lambda_pdf * (1 - 2*Lambda) * beta_k * X[:, j])
+    
+    # SE via delta method: sqrt(grad' × VCE × grad)
+    V = model.cov_params().values
+    se_ame = np.sqrt(grad @ V @ grad)
+    
+    return {
+        'ame': ame,
+        'se': se_ame,
+        'z': ame / se_ame,
+        'pval': 2 * norm.sf(abs(ame / se_ame)),
+        'ci_low': ame - 1.96 * se_ame,
+        'ci_high': ame + 1.96 * se_ame
+    }
+KEY LIBRARIES SUMMARY
+# Core stack — install all of these
+pip install statsmodels          # OLS, GLM, MLE, time series, survival
+pip install linearmodels         # Panel data (FE, RE, IV), Fama-MacBeth
+pip install lifelines            # Survival analysis: Cox, KM, parametric
+pip install scipy                # Statistical distributions, optimization
+pip install scikit-learn         # ML: RF, GBM, preprocessing, cross-validation
+pip install xgboost lightgbm     # High-performance gradient boosting
+pip install pymc                 # Bayesian inference via MCMC
+pip install pyreadstat           # Read/write .dta, .sav, .sas7bdat files
+pip install duckdb               # Fast in-process analytical database
+pip install plotly               # Interactive graphs
+pip install great-tables         # Publication-quality tables
+pip install h2o                  # H2O.ai ML (exact library Stata 19 uses)
+pip install econml               # CATE estimation (Microsoft's library)
+pip install pymare               # Meta-analysis
+pip install pingouin             # Descriptive stats with APA output style
+YOUR SOLARSTATA CONNECTION
+Your existing SolarSTATA Flask app on GitHub (sund-aie/SolarSTATA) already has the right backend foundation. The path forward: add linearmodels for panel data, lifelines for survival analysis, and build the factor-variable parser as the central command interpreter layer. The Monaco editor on the frontend + a WebSocket channel for streaming output (so results appear line-by-line like in Stata's Results window) would complete the experience.
