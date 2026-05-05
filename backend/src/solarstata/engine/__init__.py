@@ -12,8 +12,9 @@ Everything in here takes a pandas DataFrame in and returns a Result
 (structured payload + Stata-style text + r()/e() update).
 """
 
+from .binning import compute_bins
 from .descriptive import summarize
 from .results import Result, ResultsStore
 from .tabulate import tabulate
 
-__all__ = ["Result", "ResultsStore", "summarize", "tabulate"]
+__all__ = ["Result", "ResultsStore", "compute_bins", "summarize", "tabulate"]

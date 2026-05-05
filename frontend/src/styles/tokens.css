@@ -1,0 +1,44 @@
+/* SolarSTATA design tokens.
+   Source of truth: docs/ui_mockup_v3.html. Imported once from main.tsx;
+   Tailwind reads these via CSS variables (see tailwind.config.ts). */
+
+:root {
+  /* Warm dark palette — Notion-soft, not GitHub-cold */
+  --bg: #16140F;
+  --surface: #1E1B16;
+  --surface-2: #26221C;
+  --surface-3: #2F2A22;
+  --border: #2A2620;
+  --border-strong: #3A3529;
+  --text: #ECE7DA;
+  --text-muted: #968E7D;
+  --text-faint: #5C5648;
+
+  /* Single warm gold accent */
+  --accent: #D4B36A;
+  --accent-soft: rgba(212, 179, 106, 0.12);
+  --accent-glow: rgba(212, 179, 106, 0.22);
+
+  /* Semantic */
+  --good: #8FAA88;
+  --good-soft: rgba(143, 170, 136, 0.14);
+  --warn: #D89B7E;
+  --warn-soft: rgba(216, 155, 126, 0.14);
+  --info: #8FA8C4;
+  --info-soft: rgba(143, 168, 196, 0.14);
+
+  /* Type */
+  --serif: 'Instrument Serif', Georgia, serif;
+  --sans: 'Geist', -apple-system, BlinkMacSystemFont, sans-serif;
+  --mono: 'Geist Mono', 'SF Mono', monospace;
+
+  /* Radius scale */
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 20px;
+
+  /* Shadows */
+  --shadow-soft: 0 1px 2px rgba(0, 0, 0, 0.2), 0 4px 12px rgba(0, 0, 0, 0.15);
+  --shadow-elevated: 0 4px 8px rgba(0, 0, 0, 0.25), 0 12px 32px rgba(0, 0, 0, 0.2);
+}
