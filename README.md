@@ -5,34 +5,62 @@ for power users. Built to make statistical analysis approachable for dental,
 medical, and clinical research without giving up the rigor and reproducibility
 of Stata.
 
-> **Status:** Phase 1 (backend skeleton). Frontend lands in Phase 2. See the
-> kickoff brief for the full phasing.
+> **Status:** Phase 2 (frontend shell with Guided + Pro modes). Statistical
+> method coverage expands in Phase 3. See the kickoff brief for the full
+> phasing.
 
 ## What's in the box
 
-- **Guided mode** (Phase 2+) — wizard-style: Import → Inspect → Clean →
-  Analyze → Visualize → Export. No command typing required.
-- **Pro mode** (Phase 2+) — Monaco editor with Stata syntax, 4-pane layout,
-  WebSocket-streamed results.
+- **Guided mode** — wizard-style: Import → Inspect → Clean →
+  Analyze → Visualize → Export. Phase 2 covers Import + Inspect end-to-end;
+  no command typing required. Analyze fills in during Phase 3.
+- **Pro mode** — 4-pane Stata layout (Variables / Editor / Results / Graphs).
+  Phase 2 ships the layout and a syntax-highlighted Monaco placeholder; live
+  execution + WebSocket result streaming arrive in Phase 3.
 - **One statistical engine** — both modes share the same backend; switching
   modes preserves dataset and `e()` results.
 - **Built-in walkthroughs** (Phase 4) — 5 interactive tutorials on a bundled
   synthetic dental dataset.
 
-## Quick start (Phase 1 backend)
+## Quick start
+
+Requires **Python 3.11+** and **Node 18+**. On macOS/Linux you only need
+`python3` on PATH — `make setup` provisions the virtualenv automatically.
 
 ```bash
-make dev-backend       # installs deps and runs FastAPI on :8000
-make test              # runs the backend test suite
-curl http://localhost:8000/healthz
+make setup     # one-time: creates .venv and installs backend + frontend deps
+make dev       # runs FastAPI on :8000 and Vite on :5173 in parallel
 ```
 
-Or, without `make`:
+Then open http://localhost:5173.
+
+Other useful targets:
 
 ```bash
-cd backend
-pip install -e ".[dev]"
-uvicorn solarstata.main:app --reload --port 8000
+make test            # backend pytest + frontend vitest
+make build           # production build of the frontend
+make gen-dataset     # regenerate the bundled clinic_patients dataset
+make lint            # ruff + mypy + tsc --noEmit
+make clean           # remove caches, build artifacts, and .venv
+```
+
+If `python3` resolves to a version older than 3.11 (or you want to pin a
+specific minor), override the interpreter at setup time:
+
+```bash
+make PYTHON=python3.12 setup
+```
+
+## Manual setup (without `make`)
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -e backend[dev]
+uvicorn solarstata.main:app --reload --reload-dir backend/src --port 8000
+
+# in another shell
+cd frontend && npm install && npm run dev
 ```
 
 ## Project layout
@@ -65,13 +93,10 @@ archive/v1-v2/          previous Flask implementation, kept for cross-reference
 
 ## Development
 
-```bash
-make dev-backend       # FastAPI auto-reload
-make test              # pytest with coverage
-make lint              # ruff + mypy (Phase 1.1)
-make docker            # build container image
-make docker-up         # docker-compose up backend
-```
+`make dev` is the fast path. The Vite dev server proxies `/api` and `/healthz`
+to FastAPI, so the frontend always talks to the local backend without CORS
+plumbing. State (active dataset, mode, selected variable, `e()` results) is
+held in an anonymous cookie-keyed session that idles out after 24 h.
 
 ## Reference
 
