@@ -101,6 +101,141 @@ def render_tabulate_oneway(var: str, table: pd.DataFrame) -> str:
     return "\n".join([header, sep, *body_lines, sep, total_line])
 
 
+# ===================================================================
+# Regression table — Stata-style ASCII rendering
+# ===================================================================
+
+def render_regress_table(
+    *,
+    title: str,
+    depvar: str,
+    header: dict,
+    coef_rows: list[dict],
+) -> str:
+    """Render the Stata `regress` ASCII output (header block + coef table)."""
+    lines: list[str] = []
+
+    n = header.get("N", "")
+    df_m = header.get("df_m", "")
+    df_r = header.get("df_r", "")
+    F = header.get("F")
+    p = header.get("Prob_F")
+    r2 = header.get("R2")
+    r2_a = header.get("R2_adj")
+    rmse = header.get("RMSE")
+
+    # Title block
+    lines.append("")
+    lines.append(f"      {title:<60}")
+    lines.append("")
+    lines.append(
+        f"      Source |       SS           df       MS      "
+        f"  Number of obs   = {_fnum(n, 9, 0)}"
+    )
+    lines.append(
+        f"-------------+----------------------------------   F({df_m}, {df_r})"
+        f"{' ':>9}= {_fnum(F, 9)}"
+    )
+    lines.append(
+        f"      Model |                                       Prob > F"
+        f"{' ':>11}= {_fnum(p, 9, 4)}"
+    )
+    lines.append(
+        f"   Residual |                                       R-squared"
+        f"{' ':>10}= {_fnum(r2, 9, 4)}"
+    )
+    lines.append(
+        f"-------------+----------------------------------   Adj R-squared"
+        f"{' ':>6}= {_fnum(r2_a, 9, 4)}"
+    )
+    lines.append(
+        f"      Total |                                       Root MSE"
+        f"{' ':>11}= {_fnum(rmse, 9)}"
+    )
+    lines.append("")
+
+    # Coefficient table — column widths chosen to mirror Stata's default
+    name_w = max(12, max((len(r["name"]) for r in coef_rows), default=12))
+    sep = "-" * (name_w + 1) + "+" + "-" * 64
+    head = (
+        f"{depvar:>{name_w}} |{'Coefficient':>12} {'Std. err.':>10}{'t':>8}{'P>|t|':>9}"
+        f"     [95% conf. interval]"
+    )
+    lines.append(sep)
+    lines.append(head)
+    lines.append(sep)
+    for r in coef_rows:
+        sig = "*" if r.get("significant") else " "
+        lines.append(
+            f"{r['name']:>{name_w}} |{_fnum(r['coef'], 12)} "
+            f"{_fnum(r['se'], 10)} {_fnum(r['t'], 7, 2)} "
+            f"{_fnum(r['p'], 8, 4)}{sig}{_fnum(r['ci_low'], 12)} "
+            f"{_fnum(r['ci_high'], 11)}"
+        )
+    lines.append(sep)
+
+    if header.get("vce") == "robust":
+        lines.append("Robust standard errors (HC1)")
+    elif header.get("vce") == "hc3":
+        lines.append("Robust standard errors (HC3)")
+    elif header.get("vce") == "cluster":
+        lines.append(f"Standard errors clustered on {header.get('cluster')}")
+
+    return "\n".join(lines)
+
+
+def render_logit_table(
+    *,
+    title: str,
+    depvar: str,
+    header: dict,
+    coef_rows: list[dict],
+    odds_ratios: bool = False,
+) -> str:
+    """Render the Stata `logit` (or `logistic`) ASCII output."""
+    lines: list[str] = []
+    lines.append("")
+    lines.append(f"      {title:<60}")
+    lines.append("")
+    n = header.get("N", "")
+    df_m = header.get("df_m", "")
+    chi2 = header.get("LR_chi2")
+    chi2_p = header.get("Prob_chi2")
+    psr2 = header.get("Pseudo_R2")
+    ll = header.get("log_likelihood")
+    lines.append(f"      Number of obs   = {_fnum(n, 9, 0)}")
+    lines.append(f"      LR chi2({df_m})       = {_fnum(chi2, 9)}")
+    lines.append(f"      Prob > chi2     = {_fnum(chi2_p, 9, 4)}")
+    lines.append(f"      Log likelihood  = {_fnum(ll, 12, 4)}    Pseudo R2 = {_fnum(psr2, 9, 4)}")
+    lines.append("")
+
+    coef_label = "Odds ratio" if odds_ratios else "Coefficient"
+    name_w = max(12, max((len(r["name"]) for r in coef_rows), default=12))
+    sep = "-" * (name_w + 1) + "+" + "-" * 64
+    head = (
+        f"{depvar:>{name_w}} |{coef_label:>12} {'Std. err.':>10}{'z':>8}{'P>|z|':>9}"
+        f"     [95% conf. interval]"
+    )
+    lines.append(sep)
+    lines.append(head)
+    lines.append(sep)
+    for r in coef_rows:
+        sig = "*" if r.get("significant") else " "
+        lines.append(
+            f"{r['name']:>{name_w}} |{_fnum(r['coef'], 12)} "
+            f"{_fnum(r['se'], 10)} {_fnum(r['z'], 7, 2)} "
+            f"{_fnum(r['p'], 8, 4)}{sig}{_fnum(r['ci_low'], 12)} "
+            f"{_fnum(r['ci_high'], 11)}"
+        )
+    lines.append(sep)
+
+    if header.get("vce") == "robust":
+        lines.append("Robust standard errors")
+    elif header.get("vce") == "cluster":
+        lines.append(f"Standard errors clustered on {header.get('cluster')}")
+    return "\n".join(lines)
+
+
 def render_tabulate_twoway(
     var1: str, var2: str, ct: pd.DataFrame, *, row_pct: bool = False
 ) -> str:

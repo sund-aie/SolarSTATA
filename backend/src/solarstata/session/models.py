@@ -6,7 +6,10 @@ commands operate on by default; later phases will expose frame switching
 via `frame change`.
 
 Each Session also tracks `e()` and `r()` results plus a command history
-for the do-file log (Phase 3+).
+for the do-file log. Phase 3 adds `last_estimation` — the in-memory
+fitted model object that postestimation commands (predict, margins,
+test, lincom, estat) need to interrogate. It's intentionally not part
+of `e()` because statsmodels result objects don't survive JSON.
 """
 
 from __future__ import annotations
@@ -16,6 +19,31 @@ from dataclasses import dataclass, field
 from typing import Any
 
 import pandas as pd
+
+
+@dataclass
+class Estimation:
+    """In-memory record of the most recent estimation.
+
+    `model` is whatever the engine function chose to stash for postest
+    (typically a statsmodels Results object). `design_columns` is the
+    list of coefficient names in their final post-factor-expansion order.
+    `frame_name` records which frame the model was fit on so postestimation
+    can refuse to operate against the wrong dataset.
+    """
+
+    command: str
+    cmd_kind: str                            # 'regress', 'logit', etc.
+    depvar: str
+    indepvars: list[str]                     # raw input tokens (incl. factor notation)
+    design_columns: list[str]                # expanded coefficient names
+    frame_name: str
+    n_obs: int
+    if_expr: str | None = None               # qualifier used at fit time
+    in_range: str | None = None              # qualifier used at fit time
+    cluster: str | None = None
+    model: Any = None                        # statsmodels fitted result
+    extra: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -62,6 +90,7 @@ class Session:
 
     e_results: dict[str, Any] = field(default_factory=dict)
     r_results: dict[str, Any] = field(default_factory=dict)
+    last_estimation: Estimation | None = None
 
     command_history: list[str] = field(default_factory=list)
 

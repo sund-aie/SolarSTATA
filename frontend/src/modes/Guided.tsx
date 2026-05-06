@@ -6,6 +6,7 @@ import { useApp } from "../state/store";
 import { WizardRail } from "../components/WizardRail";
 import { ImportStep } from "../steps/ImportStep";
 import { InspectStep } from "../steps/InspectStep";
+import { AnalyzeStep } from "../steps/AnalyzeStep";
 import { PlaceholderStep } from "../steps/PlaceholderStep";
 import { InspectPanel } from "../components/InspectPanel";
 import { ResultsCard } from "../components/ResultsCard";
@@ -39,14 +40,7 @@ export function GuidedMode() {
             blurb="Drop test rows, recode categories, fix impossible values."
           />
         )}
-        {dataset && step === "analyze" && (
-          <PlaceholderStep
-            step="Run analyses"
-            number={4}
-            phaseLandsIn={3}
-            blurb="t-tests, ANOVA, regression with margins and predict."
-          />
-        )}
+        {dataset && step === "analyze" && <AnalyzeStep />}
         {dataset && step === "visualize" && (
           <PlaceholderStep
             step="Visualize"

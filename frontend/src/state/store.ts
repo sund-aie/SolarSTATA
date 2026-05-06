@@ -6,7 +6,22 @@
  */
 
 import { create } from "zustand";
-import type { ColumnInfo, Dataset, Mode, Step, SummarizeResult } from "../lib/types";
+import type {
+  AnalyzeRecord,
+  ColumnInfo,
+  Dataset,
+  Mode,
+  Step,
+  SummarizeResult,
+} from "../lib/types";
+
+export interface LastEstimation {
+  command: string;
+  cmd_kind: "regress" | "logit";
+  depvar: string;
+  indepvars: string[];
+  designColumns: string[];
+}
 
 export interface AppState {
   mode: Mode;
@@ -18,6 +33,7 @@ export interface AppState {
   dataset: Dataset | null;
   columns: ColumnInfo[];
   setDataset: (d: Dataset, columns: ColumnInfo[]) => void;
+  refreshColumns: (columns: ColumnInfo[]) => void;
   resetDataset: () => void;
 
   selectedVar: string | null;
@@ -27,6 +43,16 @@ export interface AppState {
   // re-selection. Key = variable names sorted joined by space.
   summarizeCache: Record<string, SummarizeResult>;
   setSummarize: (key: string, result: SummarizeResult) => void;
+
+  // Analyze step: ordered list of result blocks the user has produced this session.
+  analyzeRecords: AnalyzeRecord[];
+  pushAnalyzeRecord: (r: AnalyzeRecord) => void;
+  clearAnalyzeRecords: () => void;
+
+  // The last estimation context — drives postestimation buttons and the
+  // command-preview footer in the Analyze step.
+  lastEstimation: LastEstimation | null;
+  setLastEstimation: (e: LastEstimation | null) => void;
 
   commandHistory: string[];
   appendCommand: (cmd: string) => void;
@@ -42,7 +68,17 @@ export const useApp = create<AppState>((set) => ({
   dataset: null,
   columns: [],
   setDataset: (dataset, columns) => set({ dataset, columns, step: "inspect" }),
-  resetDataset: () => set({ dataset: null, columns: [], selectedVar: null, step: "import" }),
+  refreshColumns: (columns) => set({ columns }),
+  resetDataset: () =>
+    set({
+      dataset: null,
+      columns: [],
+      selectedVar: null,
+      step: "import",
+      analyzeRecords: [],
+      lastEstimation: null,
+      summarizeCache: {},
+    }),
 
   selectedVar: null,
   selectVar: (name) => set({ selectedVar: name }),
@@ -50,6 +86,13 @@ export const useApp = create<AppState>((set) => ({
   summarizeCache: {},
   setSummarize: (key, result) =>
     set((s) => ({ summarizeCache: { ...s.summarizeCache, [key]: result } })),
+
+  analyzeRecords: [],
+  pushAnalyzeRecord: (r) => set((s) => ({ analyzeRecords: [...s.analyzeRecords, r] })),
+  clearAnalyzeRecords: () => set({ analyzeRecords: [], lastEstimation: null }),
+
+  lastEstimation: null,
+  setLastEstimation: (e) => set({ lastEstimation: e }),
 
   commandHistory: [],
   appendCommand: (cmd) => set((s) => ({ commandHistory: [...s.commandHistory, cmd] })),

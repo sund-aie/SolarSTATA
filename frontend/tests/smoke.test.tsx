@@ -46,14 +46,18 @@ describe("App shell smoke", () => {
     const user = userEvent.setup();
     render(<App />);
 
-    await user.click(screen.getByRole("tab", { name: "Pro" }));
+    const proTab = screen.getByRole("tab", { name: "Pro" });
+    await user.click(proTab);
     expect(useApp.getState().mode).toBe("pro");
+    expect(proTab).toHaveAttribute("aria-selected", "true");
 
-    // Pro mode shows the editor placeholder region
-    expect(screen.getByRole("region", { name: /command editor placeholder/i })).toBeInTheDocument();
+    // Suspense fallback renders while Monaco lazy-loads in real browsers; in
+    // jsdom the chunk never resolves, but the mode state has already flipped.
 
-    await user.click(screen.getByRole("tab", { name: "Guided" }));
+    const guidedTab = screen.getByRole("tab", { name: "Guided" });
+    await user.click(guidedTab);
     expect(useApp.getState().mode).toBe("guided");
+    expect(guidedTab).toHaveAttribute("aria-selected", "true");
   });
 
   it("starts on the Import step in Guided mode", () => {

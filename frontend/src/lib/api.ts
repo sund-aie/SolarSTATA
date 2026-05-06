@@ -3,7 +3,12 @@
 import type {
   ColumnsResponse,
   HistogramResponse,
+  LogitResponse,
+  MarginsResponse,
+  PredictResponse,
+  RegressResponse,
   SummarizeResult,
+  TestResponse,
   UploadResponse,
 } from "./types";
 
@@ -61,5 +66,70 @@ export const api = {
       body: JSON.stringify({ frame, variables, detail }),
     });
     return (await resp.json()) as SummarizeResult;
+  },
+
+  regress: async (params: {
+    depvar: string;
+    indepvars: string[];
+    vce?: "ols" | "robust" | "hc3" | "cluster";
+    cluster?: string | null;
+    if_expr?: string | null;
+    in_range?: string | null;
+    frame?: string;
+  }): Promise<RegressResponse> => {
+    const resp = await baseFetch("/api/stats/regress", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ frame: "default", vce: "ols", ...params }),
+    });
+    return (await resp.json()) as RegressResponse;
+  },
+
+  logit: async (params: {
+    depvar: string;
+    indepvars: string[];
+    odds_ratios?: boolean;
+    vce?: "mle" | "robust" | "cluster";
+    cluster?: string | null;
+    if_expr?: string | null;
+    in_range?: string | null;
+    frame?: string;
+  }): Promise<LogitResponse> => {
+    const resp = await baseFetch("/api/stats/logit", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ frame: "default", vce: "mle", ...params }),
+    });
+    return (await resp.json()) as LogitResponse;
+  },
+
+  margins: async (atMeans = false): Promise<MarginsResponse> => {
+    const resp = await baseFetch("/api/stats/postest/margins", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ at_means: atMeans }),
+    });
+    return (await resp.json()) as MarginsResponse;
+  },
+
+  predictFitted: async (params: {
+    new_var?: string;
+    kind?: "xb" | "resid" | "pr";
+  } = {}): Promise<PredictResponse> => {
+    const resp = await baseFetch("/api/stats/postest/predict", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ new_var: "fitted_values", kind: "xb", ...params }),
+    });
+    return (await resp.json()) as PredictResponse;
+  },
+
+  test: async (restrictions: string[]): Promise<TestResponse> => {
+    const resp = await baseFetch("/api/stats/postest/test", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ restrictions }),
+    });
+    return (await resp.json()) as TestResponse;
   },
 };
