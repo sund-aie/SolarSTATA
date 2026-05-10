@@ -9,6 +9,7 @@ import type {
   RegressResponse,
   SummarizeResult,
   TestResponse,
+  UploadOrChoice,
   UploadResponse,
 } from "./types";
 
@@ -37,10 +38,25 @@ export const api = {
     return (await resp.json()) as { status: string; version: string; phase: number };
   },
 
-  upload: async (file: File): Promise<UploadResponse> => {
+  upload: async (file: File, opts: { sheet?: string; headerRow?: number } = {}): Promise<UploadOrChoice> => {
     const fd = new FormData();
     fd.append("file", file);
+    if (opts.sheet) fd.append("sheet", opts.sheet);
+    if (opts.headerRow != null) fd.append("header_row", String(opts.headerRow));
     const resp = await baseFetch("/api/data/upload", { method: "POST", body: fd });
+    return (await resp.json()) as UploadOrChoice;
+  },
+
+  finalizeUpload: async (params: {
+    file_id: string;
+    sheet: string | null;
+    header_row: number;
+  }): Promise<UploadResponse> => {
+    const resp = await baseFetch("/api/data/upload/finalize", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(params),
+    });
     return (await resp.json()) as UploadResponse;
   },
 

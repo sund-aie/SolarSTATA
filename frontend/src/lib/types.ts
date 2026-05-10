@@ -32,6 +32,26 @@ export interface UploadResponse extends Dataset {
   preview: Array<Record<string, unknown>>;
 }
 
+export interface StagedSheet {
+  name: string;
+  n_rows: number;
+  n_cols: number;
+  preview_rows: string[][];   // raw, untyped first 10 rows
+}
+
+export interface StagedUploadResponse {
+  requires_choice: true;
+  file_id: string;
+  format: "xlsx";
+  original_filename: string;
+  sheets: StagedSheet[];
+}
+
+export type UploadOrChoice = UploadResponse | StagedUploadResponse;
+
+export const isStagedResponse = (r: UploadOrChoice): r is StagedUploadResponse =>
+  (r as StagedUploadResponse).requires_choice === true;
+
 export interface ColumnsResponse {
   frame: string;
   columns: ColumnInfo[];

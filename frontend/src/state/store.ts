@@ -56,6 +56,9 @@ export interface AppState {
 
   commandHistory: string[];
   appendCommand: (cmd: string) => void;
+
+  helpOpen: boolean;
+  toggleHelp: (open?: boolean) => void;
 }
 
 export const useApp = create<AppState>((set) => ({
@@ -96,6 +99,9 @@ export const useApp = create<AppState>((set) => ({
 
   commandHistory: [],
   appendCommand: (cmd) => set((s) => ({ commandHistory: [...s.commandHistory, cmd] })),
+
+  helpOpen: false,
+  toggleHelp: (open) => set((s) => ({ helpOpen: open ?? !s.helpOpen })),
 }));
 
 export const summarizeKey = (variables: string[], detail: boolean): string =>

@@ -22,6 +22,7 @@ import type {
 import { useApp } from "../state/store";
 import { CommandPreview } from "../components/CommandPreview";
 import { ResultsCard } from "../components/ResultsCard";
+import { Tooltip } from "../components/Tooltip";
 
 type Category = "descriptives" | "comparisons" | "regression" | "postest";
 
@@ -314,14 +315,20 @@ function OlsForm({ columns }: { columns: ColumnInfo[] }) {
       </FormRow>
 
       <div className="pt-2">
-        <button
-          type="button"
-          disabled={busy || !depvar || predictors.length === 0}
-          onClick={onRun}
-          className="run-btn-primary disabled:opacity-60"
+        <Tooltip
+          what="Linear (OLS) regression. Fits y = β₀ + β₁·x₁ + … + βₖ·xₖ + ε by least squares."
+          how="Pick a continuous outcome, add one or more predictors, optionally check Robust SE if you suspect heteroskedasticity. Hit Run regression."
+          example={<>Outcome = <code className="font-mono">plaque_index</code>, Predictors = <code className="font-mono">age, i.sex, brushing_freq</code>. Negative coefficient on <code className="font-mono">brushing_freq</code> ⇒ more brushing → lower plaque.</>}
         >
-          {busy ? "Fitting…" : "Run regression"}
-        </button>
+          <button
+            type="button"
+            disabled={busy || !depvar || predictors.length === 0}
+            onClick={onRun}
+            className="run-btn-primary disabled:opacity-60"
+          >
+            {busy ? "Fitting…" : "Run regression"}
+          </button>
+        </Tooltip>
         {error && <div className="mt-3 text-[12px] text-warn">{error}</div>}
       </div>
 
@@ -423,14 +430,20 @@ function LogitForm({ columns }: { columns: ColumnInfo[] }) {
         </label>
       </FormRow>
       <div className="pt-2">
-        <button
-          type="button"
-          disabled={busy || !depvar || predictors.length === 0}
-          onClick={onRun}
-          className="run-btn-primary disabled:opacity-60"
+        <Tooltip
+          what="Logistic regression for a binary 0/1 outcome. Models log-odds(y=1) as a linear combination of predictors."
+          how="Pick a binary outcome (0/1 only), add predictors, decide whether to display odds ratios. Robust SE optional."
+          example={<>Outcome = <code className="font-mono">caries</code>, Predictors = <code className="font-mono">age, smoking, diabetes, brushing_freq</code>. Odds ratio for <code className="font-mono">smoking</code> &gt; 1 ⇒ smokers have higher odds of caries.</>}
         >
-          {busy ? "Fitting…" : oddsRatios ? "Run logistic" : "Run logit"}
-        </button>
+          <button
+            type="button"
+            disabled={busy || !depvar || predictors.length === 0}
+            onClick={onRun}
+            className="run-btn-primary disabled:opacity-60"
+          >
+            {busy ? "Fitting…" : oddsRatios ? "Run logistic" : "Run logit"}
+          </button>
+        </Tooltip>
         {error && <div className="mt-3 text-[12px] text-warn">{error}</div>}
       </div>
 
@@ -624,12 +637,29 @@ function PostestPanel({ last }: { last: { command: string; cmd_kind: "regress" |
         <code className="font-mono text-[12px] text-text">{last.command}</code>
       </div>
       <div className="flex flex-wrap gap-2">
-        <button type="button" onClick={onMargins} disabled={busy !== ""} className="run-btn-secondary !w-auto disabled:opacity-60">
-          {busy === "margins" ? "Computing…" : "Margins (AME)"}
-        </button>
-        <button type="button" onClick={onPredict} disabled={busy !== ""} className="run-btn-secondary !w-auto disabled:opacity-60">
-          {busy === "predict" ? "Computing…" : last.cmd_kind === "logit" ? "Predict probability" : "Predict fitted"}
-        </button>
+        <Tooltip
+          what="Average Marginal Effect: how much does the outcome change when each predictor moves by one unit, averaged across the sample?"
+          how="Click after running a regression or logit. The result card lists dy/dx, SE, and significance for every predictor."
+          example={<>After <code className="font-mono">logit caries …</code>: AME for <code className="font-mono">smoking</code> ≈ +0.10 ⇒ smoking raises the predicted probability of caries by about 10 percentage points.</>}
+        >
+          <button type="button" onClick={onMargins} disabled={busy !== ""} className="run-btn-secondary !w-auto disabled:opacity-60">
+            {busy === "margins" ? "Computing…" : "Margins (AME)"}
+          </button>
+        </Tooltip>
+        <Tooltip
+          what={last.cmd_kind === "logit"
+            ? "Generates a fitted-probability column (Pr(y=1)) from the current logit fit and writes it back into the dataset."
+            : "Generates fitted values (xb) from the current OLS fit and writes them back into the dataset as a new column."}
+          how="Click once. The new variable shows up in Inspect under the existing columns and is ready to plot or summarize."
+          example={last.cmd_kind === "logit"
+            ? <>After fitting caries on age + smoking, this writes <code className="font-mono">predicted_pr</code> (one probability per patient).</>
+            : <>After fitting plaque on age + brushing, this writes <code className="font-mono">fitted_values</code> (one prediction per patient).</>
+          }
+        >
+          <button type="button" onClick={onPredict} disabled={busy !== ""} className="run-btn-secondary !w-auto disabled:opacity-60">
+            {busy === "predict" ? "Computing…" : last.cmd_kind === "logit" ? "Predict probability" : "Predict fitted"}
+          </button>
+        </Tooltip>
         <div className="flex items-center gap-2">
           <select
             value={testCoef}
@@ -640,9 +670,15 @@ function PostestPanel({ last }: { last: { command: string; cmd_kind: "regress" |
               <option key={c} value={c}>{c}</option>
             ))}
           </select>
-          <button type="button" onClick={onTest} disabled={busy !== "" || !testCoef} className="run-btn-secondary !w-auto disabled:opacity-60">
-            {busy === "test" ? "Testing…" : `Test ${testCoef} = 0`}
-          </button>
+          <Tooltip
+            what="Wald test of a single coefficient = 0. Asks: is this predictor's effect distinguishable from zero?"
+            how="Pick a coefficient from the dropdown (mostly useful for joint or non-default tests; the regression card already gives you the marginal p-values). Click Test."
+            example={<>Test <code className="font-mono">brushing_freq = 0</code> after a regression. p &lt; 0.05 ⇒ brushing's effect is real (after controls).</>}
+          >
+            <button type="button" onClick={onTest} disabled={busy !== "" || !testCoef} className="run-btn-secondary !w-auto disabled:opacity-60">
+              {busy === "test" ? "Testing…" : `Test ${testCoef} = 0`}
+            </button>
+          </Tooltip>
         </div>
       </div>
       {error && <div className="text-[12px] text-warn">{error}</div>}
