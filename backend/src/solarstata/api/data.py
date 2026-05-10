@@ -1,17 +1,21 @@
-"""Data routes: upload, preview, columns, histogram."""
+"""Data routes: upload (with optional staging for multi-sheet xlsx),
+preview, columns, histogram, sheets, upload/finalize."""
 
 from __future__ import annotations
 
+import os
 import tempfile
+import uuid
 from pathlib import Path
 
 import pandas as pd
-from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
+from pydantic import BaseModel, Field
 
 from ..config import settings
 from ..engine import compute_bins
-from ..io import read_dataset
-from ..session.models import Session
+from ..io import list_xlsx_sheets, read_dataset, sniff_format
+from ..session.models import Session, StagedUpload
 from ._jsonsafe import safe
 from .deps import get_session
 
@@ -22,11 +26,19 @@ router = APIRouter(prefix="/data", tags=["data"])
 async def upload(
     file: UploadFile = File(...),
     frame_name: str = Query("default", min_length=1, max_length=64),
+    sheet: str | None = Form(None),
+    header_row: int | None = Form(None),
     session: Session = Depends(get_session),
 ) -> dict:
     """Accept a multipart upload and load it into the named frame.
 
-    Replaces an existing frame with the same name. Returns frame metadata.
+    For .xlsx files where the user hasn't yet supplied `header_row`, the
+    file is staged on disk and a `requires_choice` payload is returned so
+    the frontend can offer a sheet picker + header-row picker. The
+    follow-up call goes to `/upload/finalize`.
+
+    Replaces an existing frame with the same name. Returns frame metadata
+    on success.
     """
     if not file.filename:
         raise HTTPException(status_code=400, detail="No filename provided")
@@ -35,26 +47,123 @@ async def upload(
     if len(contents) > settings.max_upload_bytes:
         raise HTTPException(
             status_code=413,
-            detail=f"File exceeds {settings.max_upload_bytes // (1024*1024)} MB limit",
+            detail=f"File exceeds {settings.max_upload_bytes // (1024 * 1024)} MB limit",
         )
 
+    fmt = sniff_format(file.filename)
     suffix = Path(file.filename).suffix
-    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
-        tmp.write(contents)
-        tmp_path = Path(tmp.name)
+    fd, tmp_str = tempfile.mkstemp(suffix=suffix)
+    os.write(fd, contents)
+    os.close(fd)
+    tmp_path = Path(tmp_str)
+
+    # XLSX path: stage and ask for sheet/header choice unless header_row was set.
+    if fmt == "xlsx" and header_row is None:
+        try:
+            sheets = list_xlsx_sheets(tmp_path, n_preview_rows=10)
+        except Exception as exc:  # noqa: BLE001 — corrupt workbook, etc.
+            tmp_path.unlink(missing_ok=True)
+            raise HTTPException(status_code=400, detail=f"Could not read workbook: {exc}")
+
+        file_id = uuid.uuid4().hex
+        session.staged_uploads[file_id] = StagedUpload(
+            file_id=file_id,
+            path=str(tmp_path),
+            original_filename=file.filename,
+            format=fmt,
+            sheets=sheets,
+        )
+        return safe({
+            "requires_choice": True,
+            "file_id": file_id,
+            "format": fmt,
+            "original_filename": file.filename,
+            "sheets": sheets,
+        })
 
     try:
-        frame = read_dataset(tmp_path, name=frame_name)
-        frame.source_filename = file.filename
-        session.set_frame(frame, make_current=True)
-        session.append_history(f'use "{file.filename}", clear')
+        frame = read_dataset(
+            tmp_path,
+            name=frame_name,
+            sheet=sheet,
+            header_row=header_row or 1,
+        )
+    except ValueError as exc:
+        tmp_path.unlink(missing_ok=True)
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:  # noqa: BLE001
+        tmp_path.unlink(missing_ok=True)
+        raise HTTPException(status_code=400, detail=f"Failed to read file: {exc}")
+
+    tmp_path.unlink(missing_ok=True)
+    frame.source_filename = file.filename
+    session.set_frame(frame, make_current=True)
+    session.append_history(f'use "{file.filename}", clear')
+    return _materialized_response(frame)
+
+
+@router.get("/sheets")
+def staged_sheets(
+    file_id: str = Query(..., min_length=1),
+    session: Session = Depends(get_session),
+) -> dict:
+    """Return the sheet metadata for a previously staged xlsx upload."""
+    staged = session.staged_uploads.get(file_id)
+    if staged is None:
+        raise HTTPException(status_code=404, detail=f"Unknown staged file: {file_id}")
+    return safe({
+        "file_id": staged.file_id,
+        "format": staged.format,
+        "original_filename": staged.original_filename,
+        "sheets": staged.sheets,
+    })
+
+
+class FinalizeRequest(BaseModel):
+    file_id: str = Field(..., min_length=1)
+    sheet: str | None = None
+    header_row: int = Field(1, ge=1, le=1000)
+    frame_name: str = "default"
+
+
+@router.post("/upload/finalize")
+def finalize_upload(
+    req: FinalizeRequest,
+    session: Session = Depends(get_session),
+) -> dict:
+    """Finalize a staged upload using a chosen sheet and header row."""
+    staged = session.staged_uploads.get(req.file_id)
+    if staged is None:
+        raise HTTPException(status_code=404, detail=f"Unknown staged file: {req.file_id}")
+
+    tmp_path = Path(staged.path)
+    try:
+        frame = read_dataset(
+            tmp_path,
+            name=req.frame_name,
+            sheet=req.sheet,
+            header_row=req.header_row,
+        )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
-    except Exception as exc:  # noqa: BLE001 — surface parse errors to user
+    except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=400, detail=f"Failed to read file: {exc}")
     finally:
         tmp_path.unlink(missing_ok=True)
+        session.staged_uploads.pop(req.file_id, None)
 
+    frame.source_filename = staged.original_filename
+    session.set_frame(frame, make_current=True)
+    label = f'use "{staged.original_filename}"'
+    if req.sheet:
+        label += f', sheet("{req.sheet}")'
+    if req.header_row != 1:
+        label += f", firstrow({req.header_row})"
+    session.append_history(label + ", clear")
+    return _materialized_response(frame)
+
+
+def _materialized_response(frame) -> dict:
     return safe({
         "frame": frame.name,
         "filename": frame.source_filename,

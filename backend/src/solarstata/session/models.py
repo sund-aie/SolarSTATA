@@ -47,6 +47,24 @@ class Estimation:
 
 
 @dataclass
+class StagedUpload:
+    """A file the user has uploaded but hasn't fully materialized yet.
+
+    Multi-sheet Excel uploads land here first so the user can pick a sheet
+    and a header row before the dataset is parsed and committed to a Frame.
+    The temp file lives on disk under `path` and is cleaned up on finalize
+    or session eviction.
+    """
+
+    file_id: str
+    path: str
+    original_filename: str
+    format: str
+    sheets: list[dict[str, Any]] = field(default_factory=list)
+    created_at: float = field(default_factory=time.time)
+
+
+@dataclass
 class Frame:
     """A named in-memory dataset plus Stata-style metadata.
 
@@ -91,6 +109,8 @@ class Session:
     e_results: dict[str, Any] = field(default_factory=dict)
     r_results: dict[str, Any] = field(default_factory=dict)
     last_estimation: Estimation | None = None
+
+    staged_uploads: dict[str, StagedUpload] = field(default_factory=dict)
 
     command_history: list[str] = field(default_factory=list)
 

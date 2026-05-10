@@ -3,14 +3,22 @@
 Returns a Frame with as much metadata preserved as the source format
 allows. .dta retains variable labels and value labels via pyreadstat;
 csv/xlsx/parquet have no native equivalent so those fields stay empty.
+
+`read_dataset` accepts optional `sheet` and `header_row` for xlsx files
+so the caller can disambiguate multi-sheet workbooks and skip
+title/subtitle rows above the actual headers (the "TIDY LONG FORMAT"
+case). Both default to the first sheet and row 1.
 """
 
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import pandas as pd
 import pyreadstat
+
+from openpyxl import load_workbook
 
 from ..session.models import Frame
 
@@ -34,8 +42,20 @@ def sniff_format(filename: str) -> str:
     )
 
 
-def read_dataset(path: str | Path, *, name: str = "default") -> Frame:
-    """Read a file off disk into a Frame, preserving labels where possible."""
+def read_dataset(
+    path: str | Path,
+    *,
+    name: str = "default",
+    sheet: str | None = None,
+    header_row: int = 1,
+) -> Frame:
+    """Read a file off disk into a Frame, preserving labels where possible.
+
+    `header_row` is 1-based to match Stata's usual convention; pandas wants
+    0-based, so we subtract 1 internally. Rows above the header row are
+    discarded; fully-blank rows that bleed in between header and data are
+    dropped after the read.
+    """
     path = Path(path)
     fmt = sniff_format(path.name)
 
@@ -43,11 +63,14 @@ def read_dataset(path: str | Path, *, name: str = "default") -> Frame:
     value_labels: dict[str, dict] = {}
 
     if fmt == "csv":
-        df = pd.read_csv(path)
+        df = pd.read_csv(path, header=header_row - 1)
     elif fmt == "tsv":
-        df = pd.read_csv(path, sep="\t")
+        df = pd.read_csv(path, sep="\t", header=header_row - 1)
     elif fmt == "xlsx":
-        df = pd.read_excel(path)
+        df = pd.read_excel(path, sheet_name=sheet if sheet is not None else 0, header=header_row - 1)
+        # When a header row sits below blank/title rows, pandas can carry
+        # those blank rows in as all-NaN. Drop them.
+        df = df.dropna(how="all").reset_index(drop=True)
     elif fmt == "parquet":
         df = pd.read_parquet(path)
     elif fmt == "dta":
@@ -71,6 +94,42 @@ def read_dataset(path: str | Path, *, name: str = "default") -> Frame:
         storage_types=storage_types,
         source_filename=path.name,
     )
+
+
+def list_xlsx_sheets(path: str | Path, *, n_preview_rows: int = 10) -> list[dict[str, Any]]:
+    """Inspect a workbook without committing the dataset to memory.
+
+    Returns one dict per sheet with name, dimensions, and the raw first N
+    rows so the frontend can offer both a sheet picker and a header-row
+    picker before the user commits to the upload.
+    """
+    wb = load_workbook(filename=str(path), read_only=True, data_only=True)
+    try:
+        out: list[dict[str, Any]] = []
+        for name in wb.sheetnames:
+            ws = wb[name]
+            preview: list[list[str]] = []
+            for i, row in enumerate(ws.iter_rows(values_only=True)):
+                if i >= n_preview_rows:
+                    break
+                preview.append([_stringify_cell(v) for v in row])
+            out.append({
+                "name": name,
+                "n_rows": int(ws.max_row or 0),
+                "n_cols": int(ws.max_column or 0),
+                "preview_rows": preview,
+            })
+        return out
+    finally:
+        wb.close()
+
+
+def _stringify_cell(v: Any) -> str:
+    if v is None:
+        return ""
+    if isinstance(v, float) and v.is_integer():
+        return str(int(v))
+    return str(v)
 
 
 def _dedupe_columns(df: pd.DataFrame) -> pd.DataFrame:
