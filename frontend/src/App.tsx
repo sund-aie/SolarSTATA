@@ -3,15 +3,38 @@
  * or selected-var state. Pro mode is lazy-loaded so Monaco only enters
  * the bundle (and the test runtime) when the user actually opens it. */
 
-import { Suspense, lazy } from "react";
+import { Suspense, lazy, useEffect } from "react";
 import { Topbar } from "./components/Topbar";
 import { GuidedMode } from "./modes/Guided";
+import { HelpPanel } from "./components/HelpPanel";
 import { useApp } from "./state/store";
 
 const ProMode = lazy(() => import("./modes/Pro").then((m) => ({ default: m.ProMode })));
 
 function App() {
   const mode = useApp((s) => s.mode);
+  const helpOpen = useApp((s) => s.helpOpen);
+  const toggleHelp = useApp((s) => s.toggleHelp);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      // `?` opens help; Escape closes it. Skip when typing in inputs / Monaco.
+      const target = e.target as HTMLElement | null;
+      const inEditable = !!target && (
+        target.isContentEditable
+        || ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName)
+      );
+      if (e.key === "?" && !inEditable) {
+        e.preventDefault();
+        toggleHelp(true);
+      }
+      if (e.key === "Escape" && helpOpen) {
+        toggleHelp(false);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [helpOpen, toggleHelp]);
 
   return (
     <div className="grid h-screen relative" style={{ gridTemplateRows: "56px 1fr", zIndex: 2 }}>
@@ -23,6 +46,7 @@ function App() {
           <ProMode />
         </Suspense>
       )}
+      {helpOpen && <HelpPanel onClose={() => toggleHelp(false)} />}
     </div>
   );
 }

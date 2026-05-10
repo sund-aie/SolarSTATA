@@ -12,6 +12,7 @@ import { summarizeKey, useApp } from "../state/store";
 import type { ColumnInfo, HistogramResponse, SummarizeResult } from "../lib/types";
 import { CommandPreview } from "./CommandPreview";
 import { ResultsCard, ResultRow } from "./ResultsCard";
+import { Tooltip } from "./Tooltip";
 
 interface Props {
   info: ColumnInfo;
@@ -97,14 +98,20 @@ export function InspectPanel({ info }: Props) {
       </div>
 
       <div className="px-6 py-6 border-b border-border">
-        <button
-          type="button"
-          onClick={() => runSummarize(false)}
-          disabled={busy !== ""}
-          className="run-btn-primary disabled:opacity-60"
+        <Tooltip
+          what="Computes mean, standard deviation, min, and max for the selected variable."
+          how="Click once. The result card appears below with N (non-missing observations) and the four summary statistics."
+          example={<>For <code className="font-mono">plaque_index</code>: Mean ≈ 1.44, SD ≈ 0.58 — typical for a Silness–Löe score on a healthy-leaning population.</>}
         >
-          {busy === "summary" ? "Running…" : "Run summarize"}
-        </button>
+          <button
+            type="button"
+            onClick={() => runSummarize(false)}
+            disabled={busy !== ""}
+            className="run-btn-primary disabled:opacity-60"
+          >
+            {busy === "summary" ? "Running…" : "Run summarize"}
+          </button>
+        </Tooltip>
 
         {summaryResult && summaryResult.result.variables[0] && (
           <ResultsCard title="Summary statistics">
@@ -112,14 +119,20 @@ export function InspectPanel({ info }: Props) {
           </ResultsCard>
         )}
 
-        <button
-          type="button"
-          onClick={() => runSummarize(true)}
-          disabled={busy !== ""}
-          className="run-btn-secondary mt-[10px] disabled:opacity-60"
+        <Tooltip
+          what="Adds variance, skewness, kurtosis, and the 1/5/10/25/50/75/90/95/99 percentiles."
+          how="Click after the basic summary if you need distribution shape — useful before deciding on a normal-vs-non-parametric test."
+          example={<>Skewness near 0 and kurtosis near 3 ⇒ approximately normal. <code className="font-mono">plaque_index</code> typically skews right (more low-plaque patients than high).</>}
         >
-          {busy === "detail" ? "Running…" : "Run summarize, detail"}
-        </button>
+          <button
+            type="button"
+            onClick={() => runSummarize(true)}
+            disabled={busy !== ""}
+            className="run-btn-secondary mt-[10px] disabled:opacity-60"
+          >
+            {busy === "detail" ? "Running…" : "Run summarize, detail"}
+          </button>
+        </Tooltip>
 
         {detailResult && detailResult.result.variables[0] && (
           <ResultsCard title="Summary statistics, detail">

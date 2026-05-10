@@ -6,10 +6,27 @@
 
 import { useApp } from "../state/store";
 import type { Mode } from "../lib/types";
+import { Tooltip } from "./Tooltip";
 
-const MODES: { value: Mode; label: string }[] = [
-  { value: "guided", label: "Guided" },
-  { value: "pro", label: "Pro" },
+const MODES: { value: Mode; label: string; tip: { what: string; how: string; example: string } }[] = [
+  {
+    value: "guided",
+    label: "Guided",
+    tip: {
+      what: "Wizard mode. Click through Import → Inspect → Clean → Analyze → Visualize → Export with no command typing.",
+      how: "Pick a step on the left rail and use the forms in the centre. Every action shows the equivalent Stata syntax so you can pick it up over time.",
+      example: "Drop clinic_patients.csv, click a variable card, hit Run summarize.",
+    },
+  },
+  {
+    value: "pro",
+    label: "Pro",
+    tip: {
+      what: "Stata-style command editor with syntax highlighting and autocomplete.",
+      how: "Type a command in the editor and press Cmd/Ctrl+Enter to run. Results stream into the right pane block by block.",
+      example: "regress plaque_index age i.sex brushing_freq, vce(robust)",
+    },
+  },
 ];
 
 export function ModeToggle() {
@@ -30,19 +47,20 @@ export function ModeToggle() {
       {MODES.map((m) => {
         const active = mode === m.value;
         return (
-          <button
-            key={m.value}
-            type="button"
-            role="tab"
-            aria-selected={active}
-            onClick={() => setMode(m.value)}
-            data-mode={m.value}
-            className={`relative z-[2] py-[5px] px-4 font-sans text-[12px] font-medium rounded-full tracking-[0.01em] cursor-pointer transition-colors ${
-              active ? "text-bg" : "text-text-muted hover:text-text"
-            }`}
-          >
-            {m.label}
-          </button>
+          <Tooltip key={m.value} what={m.tip.what} how={m.tip.how} example={m.tip.example}>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={active}
+              onClick={() => setMode(m.value)}
+              data-mode={m.value}
+              className={`relative z-[2] py-[5px] px-4 font-sans text-[12px] font-medium rounded-full tracking-[0.01em] cursor-pointer transition-colors ${
+                active ? "text-bg" : "text-text-muted hover:text-text"
+              }`}
+            >
+              {m.label}
+            </button>
+          </Tooltip>
         );
       })}
     </div>
