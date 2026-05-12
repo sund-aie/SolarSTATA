@@ -93,6 +93,26 @@ export interface SummarizeResult {
   e_set: Record<string, unknown> | null;
 }
 
+export interface TabulateRow {
+  value: string | number | boolean | null;
+  freq: number;
+  percent: number;
+  cum: number;
+}
+
+export interface TabulateResult {
+  command: string;
+  result: {
+    variable: string;
+    n: number;
+    n_categories: number;
+    rows: TabulateRow[];
+  };
+  text: string;
+  r_set: Record<string, number | null>;
+  e_set: Record<string, unknown> | null;
+}
+
 export type Mode = "guided" | "pro";
 export type Step = "import" | "inspect" | "clean" | "analyze" | "visualize" | "export";
 

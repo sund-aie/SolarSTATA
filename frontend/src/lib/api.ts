@@ -8,6 +8,7 @@ import type {
   PredictResponse,
   RegressResponse,
   SummarizeResult,
+  TabulateResult,
   TestResponse,
   UploadOrChoice,
   UploadResponse,
@@ -82,6 +83,19 @@ export const api = {
       body: JSON.stringify({ frame, variables, detail }),
     });
     return (await resp.json()) as SummarizeResult;
+  },
+
+  tabulate: async (
+    var1: string,
+    var2: string | null = null,
+    frame = "default",
+  ): Promise<TabulateResult> => {
+    const resp = await baseFetch("/api/stats/tabulate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ frame, var1, var2 }),
+    });
+    return (await resp.json()) as TabulateResult;
   },
 
   regress: async (params: {

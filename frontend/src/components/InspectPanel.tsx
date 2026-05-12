@@ -2,14 +2,25 @@
  *   header (eyebrow / var name / serif label)
  *   2x2 stats (Type / Obs / Missing / Range)
  *   distribution histogram with axis labels
- *   "Run summarize" + result card, then "Run summarize, detail"
+ *   action: Run summarize (numeric) OR Run tabulate (binary/cat/string)
  *   sticky "Pro command equivalent" footer
+ *
+ * The action button auto-routes based on the variable kind. Stata's
+ * `summarize` coerces non-numerics to NaN and returns Obs=0; that's not
+ * useful, so for categorical/binary/string variables we fall through to
+ * `tabulate` instead. The Pro-syntax footer reflects the routing.
  */
 
 import { useEffect, useState } from "react";
 import { api } from "../lib/api";
 import { summarizeKey, useApp } from "../state/store";
-import type { ColumnInfo, HistogramResponse, SummarizeResult } from "../lib/types";
+import type {
+  ColumnInfo,
+  HistogramResponse,
+  SummarizeResult,
+  TabulateResult,
+  VarKind,
+} from "../lib/types";
 import { CommandPreview } from "./CommandPreview";
 import { ResultsCard, ResultRow } from "./ResultsCard";
 import { Tooltip } from "./Tooltip";
@@ -18,18 +29,27 @@ interface Props {
   info: ColumnInfo;
 }
 
+type Mode = "summarize" | "tabulate";
+
+const numericKinds: VarKind[] = ["numeric"];
+const isNumeric = (k: VarKind) => numericKinds.includes(k);
+
 export function InspectPanel({ info }: Props) {
   const summarizeCache = useApp((s) => s.summarizeCache);
   const setSummarize = useApp((s) => s.setSummarize);
   const appendCommand = useApp((s) => s.appendCommand);
 
   const [hist, setHist] = useState<HistogramResponse | null>(null);
-  const [busy, setBusy] = useState<"" | "summary" | "detail">("");
+  const [busy, setBusy] = useState<"" | "primary" | "detail">("");
   const [error, setError] = useState<string | null>(null);
+  // Cache the tabulate result alongside summarize so re-selection is instant.
+  const [tabulateResult, setTabulateResult] = useState<TabulateResult | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     setHist(null);
+    setTabulateResult(null);
+    setError(null);
     api
       .histogram(info.name, 15)
       .then((r) => {
@@ -43,17 +63,40 @@ export function InspectPanel({ info }: Props) {
     };
   }, [info.name]);
 
+  const mode: Mode = isNumeric(info.kind) ? "summarize" : "tabulate";
+
   const summaryKey = summarizeKey([info.name], false);
   const detailKey = summarizeKey([info.name], true);
   const summaryResult: SummarizeResult | undefined = summarizeCache[summaryKey];
   const detailResult: SummarizeResult | undefined = summarizeCache[detailKey];
 
-  const runSummarize = async (detail: boolean) => {
-    setBusy(detail ? "detail" : "summary");
+  const runPrimary = async () => {
+    setBusy("primary");
     setError(null);
     try {
-      const r = await api.summarize([info.name], detail);
-      setSummarize(detail ? detailKey : summaryKey, r);
+      if (mode === "summarize") {
+        const r = await api.summarize([info.name], false);
+        setSummarize(summaryKey, r);
+        appendCommand(r.command);
+      } else {
+        const r = await api.tabulate(info.name);
+        setTabulateResult(r);
+        appendCommand(r.command);
+      }
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setBusy("");
+    }
+  };
+
+  const runDetail = async () => {
+    if (mode !== "summarize") return;
+    setBusy("detail");
+    setError(null);
+    try {
+      const r = await api.summarize([info.name], true);
+      setSummarize(detailKey, r);
       appendCommand(r.command);
     } catch (e) {
       setError(String(e));
@@ -63,7 +106,21 @@ export function InspectPanel({ info }: Props) {
   };
 
   const range = formatRange(hist, info);
-  const command = `summarize ${info.name}`;
+  const command = mode === "summarize" ? `summarize ${info.name}` : `tabulate ${info.name}`;
+
+  const primaryLabel = mode === "summarize" ? "Run summarize" : "Run tabulate";
+  const primaryBusy = busy === "primary" ? "Running…" : primaryLabel;
+  const primaryTip = mode === "summarize"
+    ? {
+        what: "Computes mean, standard deviation, min, and max for the selected variable.",
+        how: "Click once. The result card appears below with N (non-missing observations) and the four summary statistics.",
+        example: <>For <code className="font-mono">plaque_index</code>: Mean ≈ 1.44, SD ≈ 0.58 — typical for a Silness–Löe score on a healthy-leaning population.</>,
+      }
+    : {
+        what: "Frequency table — counts, percent, and cumulative percent per category.",
+        how: "Click once. Useful when summarize would return Obs=0 because the variable isn't numeric.",
+        example: <>For <code className="font-mono">sex</code>: see how many F vs M (and dirty levels like X / ? that need cleaning).</>,
+      };
 
   return (
     <aside className="border-l border-border bg-bg flex flex-col overflow-y-auto">
@@ -98,43 +155,47 @@ export function InspectPanel({ info }: Props) {
       </div>
 
       <div className="px-6 py-6 border-b border-border">
-        <Tooltip
-          what="Computes mean, standard deviation, min, and max for the selected variable."
-          how="Click once. The result card appears below with N (non-missing observations) and the four summary statistics."
-          example={<>For <code className="font-mono">plaque_index</code>: Mean ≈ 1.44, SD ≈ 0.58 — typical for a Silness–Löe score on a healthy-leaning population.</>}
-        >
+        <Tooltip what={primaryTip.what} how={primaryTip.how} example={primaryTip.example}>
           <button
             type="button"
-            onClick={() => runSummarize(false)}
+            onClick={runPrimary}
             disabled={busy !== ""}
             className="run-btn-primary disabled:opacity-60"
           >
-            {busy === "summary" ? "Running…" : "Run summarize"}
+            {primaryBusy}
           </button>
         </Tooltip>
 
-        {summaryResult && summaryResult.result.variables[0] && (
+        {mode === "summarize" && summaryResult && summaryResult.result.variables[0] && (
           <ResultsCard title="Summary statistics">
             <SummaryRows row={summaryResult.result.variables[0]} />
           </ResultsCard>
         )}
 
-        <Tooltip
-          what="Adds variance, skewness, kurtosis, and the 1/5/10/25/50/75/90/95/99 percentiles."
-          how="Click after the basic summary if you need distribution shape — useful before deciding on a normal-vs-non-parametric test."
-          example={<>Skewness near 0 and kurtosis near 3 ⇒ approximately normal. <code className="font-mono">plaque_index</code> typically skews right (more low-plaque patients than high).</>}
-        >
-          <button
-            type="button"
-            onClick={() => runSummarize(true)}
-            disabled={busy !== ""}
-            className="run-btn-secondary mt-[10px] disabled:opacity-60"
-          >
-            {busy === "detail" ? "Running…" : "Run summarize, detail"}
-          </button>
-        </Tooltip>
+        {mode === "tabulate" && tabulateResult && (
+          <ResultsCard title="Frequency table">
+            <TabulateRows result={tabulateResult} />
+          </ResultsCard>
+        )}
 
-        {detailResult && detailResult.result.variables[0] && (
+        {mode === "summarize" && (
+          <Tooltip
+            what="Adds variance, skewness, kurtosis, and the 1/5/10/25/50/75/90/95/99 percentiles."
+            how="Click after the basic summary if you need distribution shape — useful before deciding on a normal-vs-non-parametric test."
+            example={<>Skewness near 0 and kurtosis near 3 ⇒ approximately normal. <code className="font-mono">plaque_index</code> typically skews right (more low-plaque patients than high).</>}
+          >
+            <button
+              type="button"
+              onClick={runDetail}
+              disabled={busy !== ""}
+              className="run-btn-secondary mt-[10px] disabled:opacity-60"
+            >
+              {busy === "detail" ? "Running…" : "Run summarize, detail"}
+            </button>
+          </Tooltip>
+        )}
+
+        {mode === "summarize" && detailResult && detailResult.result.variables[0] && (
           <ResultsCard title="Summary statistics, detail">
             <SummaryRows row={detailResult.result.variables[0]} detail />
           </ResultsCard>
@@ -196,6 +257,36 @@ function SummaryRows({ row, detail = false }: { row: NonNullable<SummarizeResult
         </>
       )}
     </>
+  );
+}
+
+function TabulateRows({ result }: { result: TabulateResult }) {
+  const { rows, n, n_categories } = result.result;
+  return (
+    <div className="font-mono text-[12px] text-text">
+      <div className="flex justify-between text-text-muted border-b border-border pb-1 mb-1">
+        <span>value</span>
+        <span className="flex gap-4">
+          <span className="w-[60px] text-right">freq</span>
+          <span className="w-[60px] text-right">%</span>
+          <span className="w-[60px] text-right">cum %</span>
+        </span>
+      </div>
+      {rows.map((row, i) => (
+        <div key={i} className="flex justify-between py-[3px]">
+          <span className="truncate">{String(row.value ?? "(missing)")}</span>
+          <span className="flex gap-4 text-text">
+            <span className="w-[60px] text-right">{row.freq}</span>
+            <span className="w-[60px] text-right text-text-muted">{row.percent.toFixed(2)}</span>
+            <span className="w-[60px] text-right text-text-muted">{row.cum.toFixed(2)}</span>
+          </span>
+        </div>
+      ))}
+      <div className="flex justify-between pt-1 mt-1 border-t border-border text-text-muted">
+        <span>Total · {n_categories} categories</span>
+        <span className="w-[60px] text-right text-text">{n}</span>
+      </div>
+    </div>
   );
 }
 

@@ -9,12 +9,13 @@
  *   240px       1fr         360px
  *   rows: [1fr, 240px]
  *
- * Cmd/Ctrl+Enter executes; results stream back as discrete blocks and
- * accumulate in a single scrolling pre-block for that Stata feel.
+ * Cmd/Ctrl+Enter executes; the visible Run ▶ button does the same. Results
+ * stream back as discrete blocks and accumulate in a single scrolling
+ * pre-block for that Stata feel.
  */
 
-import { useEffect, useRef, useState } from "react";
-import { StataEditor } from "../components/StataEditor";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { StataEditor, type StataEditorHandle } from "../components/StataEditor";
 import { ProWsClient } from "../lib/wsClient";
 import { useApp } from "../state/store";
 
@@ -33,7 +34,13 @@ export function ProMode() {
   const [busy, setBusy] = useState(false);
   const [connected, setConnected] = useState(false);
   const wsRef = useRef<ProWsClient | null>(null);
+  const connectedRef = useRef(false);
+  const editorRef = useRef<StataEditorHandle | null>(null);
   const resultsEndRef = useRef<HTMLDivElement | null>(null);
+
+  // Mirror the connected flag into a ref so any callback passed through to
+  // Monaco can branch on the latest value without a stale-closure trap.
+  connectedRef.current = connected;
 
   useEffect(() => {
     const ws = new ProWsClient();
@@ -75,10 +82,24 @@ export function ProMode() {
     resultsEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   }, [blocks]);
 
-  const onRun = (command: string) => {
-    if (!wsRef.current || !connected) return;
+  // Stable identity — Monaco binds this exact function at mount and our
+  // StataEditor calls it via a ref so we never lose updates. Branches off
+  // connectedRef so we surface a friendly error when the WS isn't ready.
+  const onRun = useCallback((command: string) => {
+    if (!wsRef.current) return;
+    if (!connectedRef.current) {
+      setBlocks((prev) => [...prev, {
+        command,
+        text: `error: WebSocket not connected yet — try again in a moment.`,
+        kind: "error",
+        ok: false,
+      }]);
+      return;
+    }
     wsRef.current.send(command);
-  };
+  }, []);
+
+  const triggerRun = () => editorRef.current?.run();
 
   return (
     <div
@@ -109,12 +130,28 @@ export function ProMode() {
       <Pane
         titleLeft="Command · do-file"
         titleRight={
-          <span className={connected ? "text-good" : "text-text-faint"}>
-            {connected ? "● connected" : "○ disconnected"}
-          </span>
+          <div className="flex items-center gap-3">
+            <span className={`font-mono text-[10px] uppercase tracking-[0.12em] ${connected ? "text-good" : "text-text-faint"}`}>
+              {connected ? "● connected" : "○ disconnected"}
+            </span>
+            <button
+              type="button"
+              onClick={triggerRun}
+              disabled={!connected || busy}
+              aria-label="Run current line (Cmd/Ctrl+Enter)"
+              title="Run current line · Cmd/Ctrl+Enter"
+              className="inline-flex items-center gap-[6px] bg-accent text-bg px-3 py-[4px] rounded-sm font-mono text-[10px] uppercase tracking-[0.08em] font-semibold hover:brightness-110 active:translate-y-px disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <svg width="9" height="9" viewBox="0 0 10 10" aria-hidden>
+                <path d="M2 1 L8 5 L2 9 Z" fill="currentColor" />
+              </svg>
+              {busy ? "Running" : "Run"}
+              <span className="text-[9px] opacity-70 font-normal normal-case tracking-normal ml-1">⌘⏎</span>
+            </button>
+          </div>
         }
       >
-        <StataEditor onRun={onRun} />
+        <StataEditor ref={editorRef} onRun={onRun} />
       </Pane>
 
       {/* Graphs (Phase 5) */}
@@ -133,7 +170,7 @@ export function ProMode() {
             <Empty
               phase={3}
               headline="Run a command to stream results here"
-              subline="Cmd/Ctrl+Enter on a line in the editor"
+              subline="Cmd/Ctrl+Enter on a line in the editor, or click ▶ Run above"
             />
           )}
           {blocks.map((b, i) => (
@@ -165,9 +202,7 @@ function Pane({
         <span className="font-mono text-[10px] text-text-faint uppercase tracking-[0.12em]">
           {titleLeft}
         </span>
-        {titleRight && (
-          <span className="font-mono text-[10px] uppercase tracking-[0.12em]">{titleRight}</span>
-        )}
+        {titleRight && <div>{titleRight}</div>}
       </div>
       {children}
     </div>
