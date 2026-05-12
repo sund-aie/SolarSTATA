@@ -101,8 +101,8 @@ async def _execute(ws: WebSocket, session, command_str: str) -> None:
         return
 
     # Stream each block as a discrete frame so the Pro mode results pane can
-    # render them progressively. Phase 3 only ever produces one block per
-    # command, but the protocol is already block-aware.
+    # render them progressively. Graphs additionally fan out as a `graph`
+    # message so the Graphs pane can render the figure directly.
     for result in outcome.blocks:
         block = {
             "type": "block",
@@ -112,6 +112,13 @@ async def _execute(ws: WebSocket, session, command_str: str) -> None:
             "command": result.command,
         }
         await ws.send_text(json.dumps(block))
+
+    for fig in outcome.graphs:
+        await ws.send_text(json.dumps({
+            "type": "graph",
+            "command": parsed.raw,
+            "figure": safe(fig),
+        }))
 
     if outcome.estimation is not None:
         session.last_estimation = outcome.estimation

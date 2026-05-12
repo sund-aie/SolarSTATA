@@ -26,6 +26,15 @@ import pandas as pd
 
 from ..session.models import Estimation, Frame, Session
 from .descriptive import summarize
+from .graphs import (
+    bar_with_ci as bar_fn,
+    box as box_fn,
+    histogram as histogram_fn,
+    line as line_fn,
+    marginsplot as marginsplot_fn,
+    residuals_vs_fitted as rvfplot_fn,
+    scatter as scatter_fn,
+)
 from .logit import logit as logit_fn
 from .postest import (
     estat_ic as estat_ic_fn,
@@ -230,10 +239,20 @@ def _parse_options(options_str: str) -> dict[str, str | bool]:
 @dataclass
 class DispatchOutcome:
     """One execution emits one or more `Result` blocks plus optional updates
-    to the session (estimation record, dataset mutation, command history)."""
+    to the session (estimation record, dataset mutation, command history,
+    Plotly figure)."""
     blocks: list[Result] = field(default_factory=list)
     estimation: Estimation | None = None
     dataset_mutations: list[tuple[str, pd.Series]] = field(default_factory=list)
+    graphs: list[dict] = field(default_factory=list)
+
+
+def _graph_result(fig: dict, command: str) -> Result:
+    return Result(
+        command=command,
+        structured={"kind": "graph", "figure": fig},
+        text=f"({command} rendered as graph)",
+    )
 
 
 def dispatch(parsed: ParsedCommand, session: Session, frame: Frame) -> DispatchOutcome:
@@ -251,6 +270,14 @@ def dispatch(parsed: ParsedCommand, session: Session, frame: Frame) -> DispatchO
         "test":      "test",
         "lincom":    "lincom",
         "estat":     "estat",
+        # Phase 5 graph commands
+        "histogram": "histogram", "hist": "histogram",
+        "scatter":   "scatter",
+        "box":       "box",
+        "bar":       "bar",
+        "line":      "line",
+        "rvfplot":   "rvfplot",
+        "marginsplot": "marginsplot",
     }.get(cmd, cmd)
 
     if canonical == "summarize":
@@ -327,7 +354,84 @@ def dispatch(parsed: ParsedCommand, session: Session, frame: Frame) -> DispatchO
             raise ValueError(f"estat subcommand {sub!r} not supported in Phase 3")
         return DispatchOutcome(blocks=[result])
 
-    raise ValueError(f"command {cmd!r} not supported in Phase 3")
+    # ---- Graphs (Phase 5) ----
+    if canonical == "histogram":
+        if not parsed.args:
+            raise ValueError("histogram requires a variable name")
+        bins = int(parsed.options.get("bin") or parsed.options.get("bins") or 20) \
+            if not isinstance(parsed.options.get("bin"), bool) else 20
+        group = parsed.options.get("by")
+        group = group if isinstance(group, str) else None
+        fig = histogram_fn(frame.df, parsed.args[0], bins=bins, group=group)
+        return DispatchOutcome(
+            blocks=[_graph_result(fig, parsed.raw)],
+            graphs=[fig],
+        )
+
+    if canonical == "scatter":
+        if len(parsed.args) < 2:
+            raise ValueError("scatter requires y and x (e.g., scatter y x)")
+        y_var, x_var = parsed.args[0], parsed.args[1]
+        group = parsed.options.get("by")
+        group = group if isinstance(group, str) else None
+        fig = scatter_fn(frame.df, x_var, y_var, group=group)
+        return DispatchOutcome(
+            blocks=[_graph_result(fig, parsed.raw)],
+            graphs=[fig],
+        )
+
+    if canonical == "box":
+        if not parsed.args:
+            raise ValueError("box requires a variable")
+        group = parsed.options.get("over") or parsed.options.get("by")
+        group = group if isinstance(group, str) else None
+        fig = box_fn(frame.df, parsed.args[0], group=group)
+        return DispatchOutcome(
+            blocks=[_graph_result(fig, parsed.raw)],
+            graphs=[fig],
+        )
+
+    if canonical == "bar":
+        if not parsed.args:
+            raise ValueError("bar requires a variable")
+        group = parsed.options.get("over") or parsed.options.get("by")
+        group = group if isinstance(group, str) else None
+        fig = bar_fn(frame.df, parsed.args[0], group=group)
+        return DispatchOutcome(
+            blocks=[_graph_result(fig, parsed.raw)],
+            graphs=[fig],
+        )
+
+    if canonical == "line":
+        if len(parsed.args) < 2:
+            raise ValueError("line requires y and x (e.g., line y x)")
+        y_var, x_var = parsed.args[0], parsed.args[1]
+        group = parsed.options.get("by")
+        group = group if isinstance(group, str) else None
+        fig = line_fn(frame.df, x_var, y_var, group=group)
+        return DispatchOutcome(
+            blocks=[_graph_result(fig, parsed.raw)],
+            graphs=[fig],
+        )
+
+    if canonical == "rvfplot":
+        fig = rvfplot_fn(frame.df, session.last_estimation)
+        return DispatchOutcome(
+            blocks=[_graph_result(fig, parsed.raw)],
+            graphs=[fig],
+        )
+
+    if canonical == "marginsplot":
+        if session.last_estimation is None:
+            raise ValueError("no estimates stored — run regress or logit first")
+        m = margins_fn(frame.df, session.last_estimation, at_means=False)
+        fig = marginsplot_fn(m.structured)
+        return DispatchOutcome(
+            blocks=[_graph_result(fig, parsed.raw)],
+            graphs=[fig],
+        )
+
+    raise ValueError(f"command {cmd!r} not supported in Phase 5")
 
 
 def _parse_vce(options: dict[str, str | bool]) -> tuple[str, str | None]:

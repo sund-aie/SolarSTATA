@@ -7,7 +7,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from .api import data, health, stats, walkthroughs, ws
+from .api import data, export, graphs, health, stats, walkthroughs, workspace, ws
 from .config import settings
 from .session.middleware import SessionMiddleware
 from .session.store import session_store
@@ -45,5 +45,8 @@ app.add_middleware(SessionMiddleware)
 app.include_router(health.router)
 app.include_router(data.router, prefix="/api")
 app.include_router(stats.router, prefix="/api")
+app.include_router(graphs.router, prefix="/api")
+app.include_router(export.router, prefix="/api")
+app.include_router(workspace.router, prefix="/api")
 app.include_router(walkthroughs.router, prefix="/api")
 app.include_router(ws.router)   # /ws/pro is at the root; not under /api
