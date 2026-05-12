@@ -42,3 +42,31 @@
   --shadow-soft: 0 1px 2px rgba(0, 0, 0, 0.2), 0 4px 12px rgba(0, 0, 0, 0.15);
   --shadow-elevated: 0 4px 8px rgba(0, 0, 0, 0.25), 0 12px 32px rgba(0, 0, 0, 0.2);
 }
+
+/* Warm-light palette — same hue family, inverted lightness. The gold
+   accent stays identical so brand identity carries across modes. */
+:root[data-theme="light"] {
+  --bg: #FBF9F4;
+  --surface: #F4F1E9;
+  --surface-2: #ECE7DA;
+  --surface-3: #DCD5C3;
+  --border: #D6CFC0;
+  --border-strong: #B8AF99;
+  --text: #1F1B14;
+  --text-muted: #4A4537;
+  --text-faint: #8A8270;
+
+  --accent: #B89548;
+  --accent-soft: rgba(184, 149, 72, 0.14);
+  --accent-glow: rgba(184, 149, 72, 0.24);
+
+  --good: #5F8255;
+  --good-soft: rgba(95, 130, 85, 0.14);
+  --warn: #B06542;
+  --warn-soft: rgba(176, 101, 66, 0.14);
+  --info: #4F6D8C;
+  --info-soft: rgba(79, 109, 140, 0.14);
+
+  --shadow-soft: 0 1px 2px rgba(0, 0, 0, 0.04), 0 4px 12px rgba(0, 0, 0, 0.05);
+  --shadow-elevated: 0 4px 8px rgba(0, 0, 0, 0.08), 0 12px 32px rgba(0, 0, 0, 0.06);
+}

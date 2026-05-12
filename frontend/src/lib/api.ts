@@ -162,4 +162,50 @@ export const api = {
     });
     return (await resp.json()) as TestResponse;
   },
+
+  // ===== Graphs =====
+  graph: async (
+    kind: "histogram" | "scatter" | "box" | "bar" | "line" | "residuals" | "marginsplot",
+    body: Record<string, unknown> = {},
+  ): Promise<{ command: string; kind: "graph"; figure: { data: unknown[]; layout: Record<string, unknown> } }> => {
+    const path = kind === "residuals"
+      ? "/api/graphs/residuals"
+      : kind === "marginsplot"
+      ? "/api/graphs/marginsplot"
+      : `/api/graphs/${kind}`;
+    const resp = await baseFetch(path, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    return await resp.json();
+  },
+
+  // ===== Exports =====
+  downloadDataset: async (format: "csv" | "xlsx" | "dta" | "parquet"): Promise<Blob> => {
+    const resp = await baseFetch(`/api/export/dataset?format=${format}`);
+    return await resp.blob();
+  },
+
+  downloadDoFile: async (): Promise<Blob> => {
+    const resp = await baseFetch("/api/export/dofile");
+    return await resp.blob();
+  },
+
+  downloadReport: async (format: "pdf" | "html"): Promise<Blob> => {
+    const resp = await baseFetch(`/api/export/report?format=${format}`);
+    return await resp.blob();
+  },
+
+  downloadWorkspace: async (): Promise<Blob> => {
+    const resp = await baseFetch("/api/workspace/download");
+    return await resp.blob();
+  },
+
+  uploadWorkspace: async (file: File): Promise<UploadResponse> => {
+    const fd = new FormData();
+    fd.append("file", file);
+    const resp = await baseFetch("/api/workspace/upload", { method: "POST", body: fd });
+    return (await resp.json()) as UploadResponse;
+  },
 };

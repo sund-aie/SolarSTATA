@@ -7,6 +7,8 @@ import { WizardRail } from "../components/WizardRail";
 import { ImportStep } from "../steps/ImportStep";
 import { InspectStep } from "../steps/InspectStep";
 import { AnalyzeStep } from "../steps/AnalyzeStep";
+import { VisualizeStep } from "../steps/VisualizeStep";
+import { ExportStep } from "../steps/ExportStep";
 import { PlaceholderStep } from "../steps/PlaceholderStep";
 import { InspectPanel } from "../components/InspectPanel";
 import { ResultsCard } from "../components/ResultsCard";
@@ -41,22 +43,8 @@ export function GuidedMode() {
           />
         )}
         {dataset && step === "analyze" && <AnalyzeStep />}
-        {dataset && step === "visualize" && (
-          <PlaceholderStep
-            step="Visualize"
-            number={5}
-            phaseLandsIn={5}
-            blurb="Histograms, scatter, residuals, survival curves."
-          />
-        )}
-        {dataset && step === "export" && (
-          <PlaceholderStep
-            step="Export results"
-            number={6}
-            phaseLandsIn={5}
-            blurb="PDF, HTML, Word, or save dataset back as .dta or .csv."
-          />
-        )}
+        {dataset && step === "visualize" && <VisualizeStep />}
+        {dataset && step === "export" && <ExportStep />}
       </main>
       {dataset && (showInspect ? (
         selectedInfo ? (

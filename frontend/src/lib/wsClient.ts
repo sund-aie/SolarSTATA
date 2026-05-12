@@ -7,6 +7,7 @@
 export type WsEvent =
   | { type: "started"; command: string }
   | { type: "block"; kind: string; structured: unknown; text: string; command: string }
+  | { type: "graph"; command: string; figure: { data: unknown[]; layout: Record<string, unknown> } }
   | { type: "history_appended"; command: string }
   | { type: "complete" }
   | { type: "error"; detail: string }

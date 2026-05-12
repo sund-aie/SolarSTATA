@@ -16,6 +16,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { StataEditor, type StataEditorHandle } from "../components/StataEditor";
+import { Plot, type PlotlyFigure } from "../components/Plot";
 import { ProWsClient } from "../lib/wsClient";
 import { useApp } from "../state/store";
 
@@ -26,11 +27,18 @@ interface Block {
   ok: boolean;
 }
 
+interface GraphFrame {
+  command: string;
+  figure: PlotlyFigure;
+  timestamp: number;
+}
+
 export function ProMode() {
   const columns = useApp((s) => s.columns);
   const appendCommand = useApp((s) => s.appendCommand);
 
   const [blocks, setBlocks] = useState<Block[]>([]);
+  const [graphs, setGraphs] = useState<GraphFrame[]>([]);
   const [busy, setBusy] = useState(false);
   const [connected, setConnected] = useState(false);
   const wsRef = useRef<ProWsClient | null>(null);
@@ -54,6 +62,9 @@ export function ProMode() {
       }
       if (event.type === "block") {
         setBlocks((prev) => [...prev, { command: event.command, text: event.text, kind: event.kind, ok: true }]);
+      }
+      if (event.type === "graph") {
+        setGraphs((prev) => [{ command: event.command, figure: event.figure as PlotlyFigure, timestamp: Date.now() }, ...prev].slice(0, 8));
       }
       if (event.type === "history_appended") {
         appendCommand(event.command);
@@ -154,13 +165,23 @@ export function ProMode() {
         <StataEditor ref={editorRef} onRun={onRun} />
       </Pane>
 
-      {/* Graphs (Phase 5) */}
-      <Pane className="row-span-2" titleLeft="Graphs">
-        <Empty
-          phase={5}
-          headline="Plotly graphs land in Phase 5"
-          subline="histograms · scatter · residuals · KM curves"
-        />
+      {/* Graphs — latest on top */}
+      <Pane className="row-span-2" titleLeft={`Graphs · ${graphs.length}`}>
+        <div className="flex-1 overflow-y-auto p-3 space-y-3">
+          {graphs.length === 0 && (
+            <div className="text-text-faint text-[12px] text-center mt-10 px-4">
+              <div className="font-serif italic text-[14px] mb-2">No plots yet</div>
+              Run a graph command like <code className="font-mono">histogram plaque_index</code>
+              {" "}or <code className="font-mono">scatter age plaque_index</code> to see it here.
+            </div>
+          )}
+          {graphs.map((g) => (
+            <div key={g.timestamp} className="bg-surface border border-border rounded-sm p-2">
+              <div className="font-mono text-[10px] text-text-faint mb-1 truncate">{g.command}</div>
+              <Plot figure={g.figure} height={220} />
+            </div>
+          ))}
+        </div>
       </Pane>
 
       {/* Results */}
