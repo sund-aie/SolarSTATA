@@ -113,50 +113,54 @@ export function ImportStep() {
       </div>
 
       {phase.kind === "drop" && (
-        <div
-          role="button"
-          tabIndex={0}
-          aria-label="Drop dataset file here or click to choose"
-          onClick={() => fileInputRef.current?.click()}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" || e.key === " ") fileInputRef.current?.click();
-          }}
-          onDragOver={(e) => {
-            e.preventDefault();
-            setDragOver(true);
-          }}
-          onDragLeave={() => setDragOver(false)}
-          onDrop={(e) => {
-            e.preventDefault();
-            setDragOver(false);
-            const f = e.dataTransfer.files[0];
-            if (f) handleFile(f);
-          }}
-          className={`flex flex-col items-center justify-center text-center p-16 rounded-md border-2 border-dashed transition-colors cursor-pointer ${
-            dragOver ? "border-accent bg-accent-soft" : "border-border bg-surface"
-          }`}
-        >
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept={ACCEPT}
-            hidden
-            onChange={(e) => {
-              const f = e.target.files?.[0];
-              if (f) handleFile(f);
-              e.target.value = "";
+        <>
+          <div
+            role="button"
+            tabIndex={0}
+            aria-label="Drop dataset file here or click to choose"
+            onClick={() => fileInputRef.current?.click()}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") fileInputRef.current?.click();
             }}
-          />
-          <div className="font-serif italic text-[20px] text-text mb-1">
-            {busy ? "Loading…" : "Drop your file here"}
+            onDragOver={(e) => {
+              e.preventDefault();
+              setDragOver(true);
+            }}
+            onDragLeave={() => setDragOver(false)}
+            onDrop={(e) => {
+              e.preventDefault();
+              setDragOver(false);
+              const f = e.dataTransfer.files[0];
+              if (f) handleFile(f);
+            }}
+            className={`flex flex-col items-center justify-center text-center p-16 rounded-md border-2 border-dashed transition-colors cursor-pointer ${
+              dragOver ? "border-accent bg-accent-soft" : "border-border bg-surface"
+            }`}
+          >
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept={ACCEPT}
+              hidden
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (f) handleFile(f);
+                e.target.value = "";
+              }}
+            />
+            <div className="font-serif italic text-[20px] text-text mb-1">
+              {busy ? "Loading…" : "Drop your file here"}
+            </div>
+            <div className="text-text-muted text-[13px] mb-4">
+              or click to browse — CSV, Excel, .dta, Parquet, up to 50&nbsp;MB
+            </div>
+            <span className="font-mono text-[10px] text-text-faint uppercase tracking-[0.12em]">
+              {ACCEPT.split(",").join(" · ")}
+            </span>
           </div>
-          <div className="text-text-muted text-[13px] mb-4">
-            or click to browse — CSV, Excel, .dta, Parquet, up to 50&nbsp;MB
-          </div>
-          <span className="font-mono text-[10px] text-text-faint uppercase tracking-[0.12em]">
-            {ACCEPT.split(",").join(" · ")}
-          </span>
-        </div>
+
+          <WorkspaceRestore onError={setError} onLoaded={commitDataset} />
+        </>
       )}
 
       {phase.kind === "picking_sheet" && (
@@ -190,6 +194,57 @@ export function ImportStep() {
           {error}
         </div>
       )}
+    </div>
+  );
+}
+
+// Workspace-restore zone shown alongside the regular dropzone.
+function WorkspaceRestore({
+  onError,
+  onLoaded,
+}: {
+  onError: (msg: string) => void;
+  onLoaded: (resp: UploadResponse) => Promise<void>;
+}) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [busy, setBusy] = useState(false);
+
+  const handleFile = async (file: File) => {
+    setBusy(true);
+    onError("");
+    try {
+      const resp = await api.uploadWorkspace(file);
+      await onLoaded(resp);
+    } catch (e) {
+      onError(e instanceof ApiError ? e.detail : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="mt-4 flex items-center gap-3 bg-surface border border-border rounded-sm p-3 text-[12px] text-text-muted">
+      <input
+        ref={inputRef}
+        type="file"
+        accept=".json"
+        hidden
+        onChange={(e) => {
+          const f = e.target.files?.[0];
+          if (f) handleFile(f);
+          e.target.value = "";
+        }}
+      />
+      <span className="font-serif italic">Have a workspace JSON?</span>
+      <span className="flex-1">Restore your dataset + e() + command history from a previous session.</span>
+      <button
+        type="button"
+        onClick={() => inputRef.current?.click()}
+        disabled={busy}
+        className="run-btn-secondary !w-auto disabled:opacity-60"
+      >
+        {busy ? "Restoring…" : "Upload workspace"}
+      </button>
     </div>
   );
 }
