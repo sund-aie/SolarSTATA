@@ -52,6 +52,7 @@ class BarRequest(BaseModel):
     frame: str = "default"
     var: str = Field(..., min_length=1)
     group: str | None = None
+    subgroup: str | None = None
     ci: float = Field(0.95, ge=0.5, le=0.999)
 
 
@@ -99,11 +100,16 @@ def stats_box(req: BoxRequest, session: Session = Depends(get_session)) -> dict:
 def stats_bar(req: BarRequest, session: Session = Depends(get_session)) -> dict:
     frame = _require_frame(session, req.frame)
     try:
-        fig = bar_with_ci(frame.df, req.var, group=req.group, ci=req.ci,
-                          value_labels=frame.value_labels)
+        fig = bar_with_ci(frame.df, req.var, group=req.group, subgroup=req.subgroup,
+                          ci=req.ci, value_labels=frame.value_labels)
     except KeyError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
-    return _packed(fig, command=_cmd("graph bar", f"(mean) {req.var}", group=req.group, over=True))
+    # Stata grouped-bar syntax: graph bar (mean) y, over(sub) over(group) asyvars
+    if req.subgroup and req.group:
+        command = f"graph bar (mean) {req.var}, over({req.subgroup}) over({req.group}) asyvars"
+    else:
+        command = _cmd("graph bar", f"(mean) {req.var}", group=req.group, over=True)
+    return _packed(fig, command=command)
 
 
 @router.post("/line")

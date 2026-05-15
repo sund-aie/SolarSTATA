@@ -186,14 +186,14 @@ function ReportCard({
   const pdfDisabled = !capabilities.pdf;
   const pdfWhat = capabilities.pdf
     ? "PDF rendered via WeasyPrint. Instrument Serif headings, IBM Plex Sans body."
-    : "PDF export isn't available on this server. WeasyPrint needs the GTK shared "
-      + "libraries (libgobject, libpango, …) which don't ship with Python on Windows. "
-      + "Use HTML and print-to-PDF from your browser instead.";
+    : "PDF export requires GTK system libraries (not installed on this machine). "
+      + "Use HTML — it works in any browser and you can print to PDF from there.";
   const pdfHow = capabilities.pdf
     ? "Click to download. A4 pages, page numbers, command + output blocks."
-    : "On macOS / Linux, PDF should work out of the box. On Windows, install "
-      + "GTK 3 runtime from https://github.com/tschoonj/GTK-for-Windows-Runtime-Environment-Installer "
-      + "and restart SolarSTATA.";
+    : "Click HTML instead, open the file in any browser, and press Cmd/Ctrl+P to "
+      + "save it as PDF. To enable PDF export here, install the GTK 3 runtime "
+      + "(https://github.com/tschoonj/GTK-for-Windows-Runtime-Environment-Installer "
+      + "on Windows) and restart SolarSTATA.";
   const pdfExample = capabilities.pdf
     ? "Drop into a paper as a Methods appendix."
     : <>HTML works everywhere &mdash; <code className="font-mono">Cmd/Ctrl+P</code> in your browser will save it as PDF.</>;

@@ -1,22 +1,26 @@
 /* Analyze step: categorized analysis menu + inline forms + result cards.
  *
- * Phase 3 fills in:
- *   - Regression: OLS, Logit (with odds ratios, robust/cluster SE)
- *   - Postestimation: Margins (AME), Predict (fitted values), Test (= 0)
- *
- * Descriptives and Comparisons categories are visible but stubbed to redirect
- * to the Inspect step or later phases.
+ * v3.0.2 fills in Descriptives (tabstat by group), Comparisons (oneway with
+ * Bartlett + posthoc, two-way ANOVA, repeated-measures ANOVA), and a new
+ * Diagnostics category (Shapiro-Wilk, Levene). The Regression and
+ * Postestimation categories are unchanged from Phase 3.
  */
 
 import { useRef, useState } from "react";
 import { api, ApiError } from "../lib/api";
 import type {
+  AnovaRmResponse,
+  AnovaTwoResponse,
   CoefRow,
   ColumnInfo,
+  LeveneResponse,
   LogitResponse,
   MarginsResponse,
+  OnewayResponse,
   PredictResponse,
   RegressResponse,
+  ShapiroResponse,
+  TabstatResponse,
   TestResponse,
 } from "../lib/types";
 import { useApp } from "../state/store";
@@ -24,9 +28,11 @@ import { CommandPreview } from "../components/CommandPreview";
 import { ResultsCard } from "../components/ResultsCard";
 import { Tooltip } from "../components/Tooltip";
 
-type Category = "descriptives" | "comparisons" | "regression" | "postest";
+type Category = "descriptives" | "comparisons" | "diagnostics" | "regression" | "postest";
 
 type RegressionPick = "ols" | "logit";
+type ComparisonPick = "oneway" | "anova_two" | "anova_rm";
+type DiagnosticPick = "shapiro" | "levene";
 
 interface FactorState {
   name: string;
@@ -50,6 +56,8 @@ export function AnalyzeStep() {
 
   const [category, setCategory] = useState<Category>("regression");
   const [pick, setPick] = useState<RegressionPick>("ols");
+  const [comparisonPick, setComparisonPick] = useState<ComparisonPick>("oneway");
+  const [diagnosticPick, setDiagnosticPick] = useState<DiagnosticPick>("shapiro");
 
   if (!dataset) return null;
 
@@ -74,17 +82,15 @@ export function AnalyzeStep() {
         )}
 
         {category === "descriptives" && (
-          <CategoryHint
-            heading="Descriptives live in Inspect"
-            body="Click any variable card on the Inspect step for one-variable descriptives, or use Pro mode for `summarize` / `tabulate` directly."
-          />
+          <TabstatForm columns={columns} />
         )}
 
         {category === "comparisons" && (
-          <CategoryHint
-            heading="t-tests / ANOVA arrive in Phase 3.1"
-            body="Phase 3 ships Regression and Postestimation. Comparisons (t-test, ANOVA, chi²) is the next slice."
-          />
+          <ComparisonPicker pick={comparisonPick} setPick={setComparisonPick} columns={columns} />
+        )}
+
+        {category === "diagnostics" && (
+          <DiagnosticPicker pick={diagnosticPick} setPick={setDiagnosticPick} columns={columns} />
         )}
 
         {category === "postest" && lastEst && (
@@ -125,6 +131,7 @@ export function AnalyzeStep() {
 const CATEGORIES: { id: Category; label: string }[] = [
   { id: "descriptives", label: "Descriptives" },
   { id: "comparisons",  label: "Comparisons" },
+  { id: "diagnostics",  label: "Diagnostics" },
   { id: "regression",   label: "Regression" },
   { id: "postest",      label: "Postestimation" },
 ];
@@ -725,10 +732,409 @@ function RecordCard({ record }: { record: { kind: string; command: string; paylo
   if (record.kind === "test") {
     return <TestResult resp={record.payload as TestResponse} command={record.command} />;
   }
+  if (record.kind === "oneway") {
+    return <OnewayCard resp={record.payload as OnewayResponse & { _perLevelLabel?: string }} command={record.command} />;
+  }
+  if (record.kind === "anova_two") {
+    return <AnovaTwoCard resp={record.payload as AnovaTwoResponse} command={record.command} />;
+  }
+  if (record.kind === "anova_rm") {
+    return <AnovaRmCard resp={record.payload as AnovaRmResponse} command={record.command} />;
+  }
+  if (record.kind === "shapiro") {
+    return <ShapiroCard resp={record.payload as ShapiroResponse} command={record.command} />;
+  }
+  if (record.kind === "levene") {
+    return <LeveneCard resp={record.payload as LeveneResponse} command={record.command} />;
+  }
+  if (record.kind === "tabstat") {
+    return <TabstatCard resp={record.payload as TabstatResponse} command={record.command} />;
+  }
   return (
     <ResultsCard title={COMMAND_LABELS[record.kind] ?? record.kind}>
       <pre className="font-mono text-[11px] text-text-muted whitespace-pre">{record.text}</pre>
     </ResultsCard>
+  );
+}
+
+
+function OnewayCard({ resp, command }: { resp: OnewayResponse & { _perLevelLabel?: string }; command: string }) {
+  const r = resp.result;
+  const title = resp._perLevelLabel
+    ? `One-way ANOVA — ${r.depvar} by ${r.groupvar}  ·  ${resp._perLevelLabel}`
+    : `One-way ANOVA — ${r.depvar} by ${r.groupvar}`;
+  return (
+    <>
+      <ResultsCard title={title}>
+        <HeaderGrid rows={[
+          ["N",        fmt(r.n)],
+          ["Groups",   fmt(r.k)],
+          ["F",        fmt(r.F)],
+          ["Prob > F", fmt(r.p, 4)],
+        ]} />
+
+        <div className="mt-4">
+          <table className="w-full font-mono text-[12px]">
+            <thead className="text-text-muted text-[11px] uppercase tracking-[0.04em]">
+              <tr>
+                <th className="text-left py-2 pr-3">Source</th>
+                <th className="text-right py-2 px-2">SS</th>
+                <th className="text-right py-2 px-2">df</th>
+                <th className="text-right py-2 px-2">MS</th>
+                <th className="text-right py-2 px-2">F</th>
+                <th className="text-right py-2 px-2">Prob &gt; F</th>
+              </tr>
+            </thead>
+            <tbody>
+              {r.anova_table.Source.map((src, i) => (
+                <tr key={src} className="border-t border-border">
+                  <td className="py-1 pr-3 text-text">{src}</td>
+                  <td className="text-right py-1 px-2 text-text-muted">{fmt(r.anova_table.SS[i])}</td>
+                  <td className="text-right py-1 px-2 text-text-muted">{r.anova_table.df[i]}</td>
+                  <td className="text-right py-1 px-2 text-text-muted">{fmt(r.anova_table.MS[i])}</td>
+                  <td className="text-right py-1 px-2 text-text-muted">{fmt(r.anova_table.F[i])}</td>
+                  <td className="text-right py-1 px-2 text-text-muted">{fmt(r.anova_table.Prob_F[i], 4)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        {r.bartlett && (
+          <div className="mt-4 pt-3 border-t border-border">
+            <div className="text-[11px] uppercase tracking-[0.08em] text-text-faint mb-1">
+              Bartlett's test for equal variances
+            </div>
+            <div className="font-mono text-[12px] text-text">
+              χ²({r.bartlett.df}) = {fmt(r.bartlett.chi2)} &nbsp;·&nbsp; Prob &gt; χ² = {fmt(r.bartlett.p, 4)}
+              {r.bartlett.p != null && r.bartlett.p < 0.05 && (
+                <span className="ml-2 text-warn">→ variances likely unequal</span>
+              )}
+            </div>
+            {r.bartlett.note && (
+              <div className="text-[11px] text-text-faint mt-1">{r.bartlett.note}</div>
+            )}
+          </div>
+        )}
+
+        {r.posthoc !== "none" && r.posthoc_block && (
+          <div className="mt-4 pt-3 border-t border-border">
+            <div className="text-[11px] uppercase tracking-[0.08em] text-text-faint mb-2">
+              Pairwise comparisons — {r.posthoc} adjusted
+            </div>
+            <PairwiseMatrix block={r.posthoc_block} />
+          </div>
+        )}
+      </ResultsCard>
+      <CommandLine command={command} />
+    </>
+  );
+}
+
+function PairwiseMatrix({ block }: { block: NonNullable<OnewayResponse["result"]["posthoc_block"]> }) {
+  const allGroups = Array.from(new Set(block.comparisons.flatMap((c) => [c.a, c.b])));
+  // sort for stable layout
+  allGroups.sort();
+  const lookup = (a: string, b: string) => block.matrix[a]?.[b] ?? null;
+  return (
+    <div className="overflow-x-auto">
+      <table className="font-mono text-[11px]">
+        <thead className="text-text-muted">
+          <tr>
+            <th className="text-left p-1 pr-3"></th>
+            {allGroups.map((g) => (
+              <th key={g} className="text-right p-1 px-2">{g}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {allGroups.map((row) => (
+            <tr key={row} className="border-t border-border">
+              <td className="py-1 pr-3 text-text">{row}</td>
+              {allGroups.map((col) => {
+                if (row === col) return <td key={col} className="text-right p-1 px-2 text-text-faint">—</td>;
+                const cell = lookup(row, col);
+                if (!cell) return <td key={col} className="text-right p-1 px-2 text-text-faint">·</td>;
+                const sig = cell.p_adj != null && cell.p_adj < 0.05;
+                return (
+                  <td key={col} className={`text-right p-1 px-2 ${sig ? "text-accent" : "text-text-muted"}`}>
+                    <div>{fmt(cell.mean_diff)}</div>
+                    <div className="text-[10px] text-text-faint">p={fmt(cell.p_adj, 4)}</div>
+                  </td>
+                );
+              })}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function AnovaTwoCard({ resp, command }: { resp: AnovaTwoResponse; command: string }) {
+  const r = resp.result;
+  return (
+    <>
+      <ResultsCard title={`Two-way ANOVA — ${r.depvar} ~ ${r.factor_a} ${r.interaction ? "×" : "+"} ${r.factor_b}`}>
+        <HeaderGrid rows={[
+          ["N",       fmt(r.n)],
+          ["R²",      fmt(r.r_squared, 4)],
+          ["Adj. R²", fmt(r.r_squared_adj, 4)],
+        ]} />
+        <div className="mt-4">
+          <table className="w-full font-mono text-[12px]">
+            <thead className="text-text-muted text-[11px] uppercase tracking-[0.04em]">
+              <tr>
+                <th className="text-left py-2 pr-3">Source</th>
+                <th className="text-right py-2 px-2">SS</th>
+                <th className="text-right py-2 px-2">df</th>
+                <th className="text-right py-2 px-2">MS</th>
+                <th className="text-right py-2 px-2">F</th>
+                <th className="text-right py-2 px-2">Prob &gt; F</th>
+              </tr>
+            </thead>
+            <tbody>
+              {r.rows.map((row) => {
+                const sig = row.Prob_F != null && row.Prob_F < 0.05;
+                return (
+                  <tr key={row.Source} className="border-t border-border">
+                    <td className={`py-1 pr-3 ${sig ? "text-accent" : "text-text"}`}>{row.Source}</td>
+                    <td className="text-right py-1 px-2 text-text-muted">{fmt(row.SS)}</td>
+                    <td className="text-right py-1 px-2 text-text-muted">{row.df}</td>
+                    <td className="text-right py-1 px-2 text-text-muted">{fmt(row.MS)}</td>
+                    <td className="text-right py-1 px-2 text-text-muted">{fmt(row.F)}</td>
+                    <td className="text-right py-1 px-2 text-text-muted">{fmt(row.Prob_F, 4)}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </ResultsCard>
+      <CommandLine command={command} />
+    </>
+  );
+}
+
+function AnovaRmCard({ resp, command }: { resp: AnovaRmResponse; command: string }) {
+  const r = resp.result;
+  const hasCorr = r.correction !== "none";
+  const bs = r.between_summary;
+  const bsSig = bs?.p != null && bs.p < 0.05;
+  return (
+    <>
+      <ResultsCard title={`Repeated-measures ANOVA — ${r.depvar}`}>
+        <HeaderGrid rows={[
+          ["Subjects",   fmt(r.n_subjects)],
+          ["Obs",        fmt(r.n_obs)],
+          ["Within",     r.within],
+          ["Between",    r.between ?? "—"],
+          ["Correction", r.correction === "gg" ? "Greenhouse-Geisser" : r.correction === "hf" ? "Huynh-Feldt" : "none"],
+        ]} />
+        <div className="mt-4">
+          <table className="w-full font-mono text-[12px]">
+            <thead className="text-text-muted text-[11px] uppercase tracking-[0.04em]">
+              <tr>
+                <th className="text-left py-2 pr-3">Source</th>
+                <th className="text-right py-2 px-2">F</th>
+                <th className="text-right py-2 px-2">df (num, den)</th>
+                <th className="text-right py-2 px-2">P</th>
+                {hasCorr && <th className="text-right py-2 px-2">ε</th>}
+                {hasCorr && <th className="text-right py-2 px-2">P (adj)</th>}
+              </tr>
+            </thead>
+            <tbody>
+              {r.rows.map((row) => {
+                const pUsed = hasCorr ? row.p_adj : row.p;
+                const sig = pUsed != null && pUsed < 0.05;
+                return (
+                  <tr key={row.Source} className="border-t border-border">
+                    <td className={`py-1 pr-3 ${sig ? "text-accent" : "text-text"}`}>{row.Source}</td>
+                    <td className="text-right py-1 px-2 text-text-muted">{fmt(row.F)}</td>
+                    <td className="text-right py-1 px-2 text-text-muted">({fmt(row.df_num)}, {fmt(row.df_den)})</td>
+                    <td className="text-right py-1 px-2 text-text-muted">{fmt(row.p, 4)}</td>
+                    {hasCorr && <td className="text-right py-1 px-2 text-text-muted">{fmt(row.epsilon, 3)}</td>}
+                    {hasCorr && <td className="text-right py-1 px-2 text-text-muted">{fmt(row.p_adj, 4)}</td>}
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+        {r.between && bs && (
+          <div className="mt-4 p-3 rounded-md border border-border bg-surface-2">
+            <div className="text-[11px] uppercase tracking-[0.04em] text-text-muted mb-2">
+              Between-subjects effect — {r.between}
+            </div>
+            <div className="font-mono text-[12px] flex gap-6">
+              <div>F = <span className={bsSig ? "text-accent" : "text-text"}>{fmt(bs.F)}</span></div>
+              <div>P = <span className={bsSig ? "text-accent" : "text-text"}>{fmt(bs.p, 4)}</span></div>
+              <div className="text-text-muted">k = {bs.k ?? "—"}</div>
+              <div className="text-text-muted">subjects = {bs.n_subjects ?? "—"}</div>
+            </div>
+            <div className="mt-2 text-[11px] text-text-faint">
+              Computed from subject-level means (split-plot workaround). A proper
+              mixed-effects between×within fit lands in v3.1.
+            </div>
+          </div>
+        )}
+      </ResultsCard>
+      <CommandLine command={command} />
+    </>
+  );
+}
+
+function ShapiroCard({ resp, command }: { resp: ShapiroResponse; command: string }) {
+  const r = resp.result;
+  return (
+    <>
+      <ResultsCard title={`Shapiro-Wilk — ${r.variable}${r.by ? ` by ${r.by}` : ""}`}>
+        <table className="w-full font-mono text-[12px]">
+          <thead className="text-text-muted text-[11px] uppercase tracking-[0.04em]">
+            <tr>
+              <th className="text-left py-2 pr-3">Group</th>
+              <th className="text-right py-2 px-2">N</th>
+              <th className="text-right py-2 px-2">W</th>
+              <th className="text-right py-2 px-2">P</th>
+            </tr>
+          </thead>
+          <tbody>
+            {r.rows.map((row, i) => {
+              const reject = row.p != null && row.p < 0.05;
+              return (
+                <tr key={i} className="border-t border-border">
+                  <td className="py-1 pr-3 text-text">{row.group ?? "(all)"}</td>
+                  <td className="text-right py-1 px-2 text-text-muted">{row.n}</td>
+                  <td className="text-right py-1 px-2 text-text-muted">{fmt(row.W, 4)}</td>
+                  <td className={`text-right py-1 px-2 ${reject ? "text-warn" : "text-text-muted"}`}>{fmt(row.p, 4)}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+        <div className="mt-3 text-[11px] text-text-faint">
+          p &lt; 0.05 ⇒ reject normality. Consider Mann-Whitney, Kruskal-Wallis,
+          or Friedman if the assumption fails.
+        </div>
+      </ResultsCard>
+      <CommandLine command={command} />
+    </>
+  );
+}
+
+function LeveneCard({ resp, command }: { resp: LeveneResponse; command: string }) {
+  const r = resp.result;
+  const reject = r.p != null && r.p < 0.05;
+  return (
+    <>
+      <ResultsCard title={`Levene's test — ${r.depvar} by ${r.groupvar}`}>
+        <HeaderGrid rows={[
+          ["W₀",       fmt(r.W, 4)],
+          ["df",       `(${r.df1}, ${r.df2})`],
+          ["Prob > F", fmt(r.p, 4)],
+          ["Center",   r.center],
+        ]} />
+        <div className="mt-3">
+          <table className="w-full font-mono text-[12px]">
+            <thead className="text-text-muted text-[11px] uppercase tracking-[0.04em]">
+              <tr>
+                <th className="text-left py-2 pr-3">{r.groupvar}</th>
+                <th className="text-right py-2 px-2">N</th>
+                <th className="text-right py-2 px-2">Mean</th>
+                <th className="text-right py-2 px-2">SD</th>
+              </tr>
+            </thead>
+            <tbody>
+              {r.groups.map((g) => (
+                <tr key={g.group} className="border-t border-border">
+                  <td className="py-1 pr-3 text-text">{g.group}</td>
+                  <td className="text-right py-1 px-2 text-text-muted">{g.n}</td>
+                  <td className="text-right py-1 px-2 text-text-muted">{fmt(g.mean, 4)}</td>
+                  <td className="text-right py-1 px-2 text-text-muted">{fmt(g.sd, 4)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <div className={`mt-3 text-[11px] ${reject ? "text-warn" : "text-text-faint"}`}>
+          {reject
+            ? "p < 0.05 ⇒ variances differ across groups. Consider Welch's correction or non-parametric tests."
+            : "p ≥ 0.05 ⇒ no strong evidence of unequal variances."}
+        </div>
+      </ResultsCard>
+      <CommandLine command={command} />
+    </>
+  );
+}
+
+function TabstatCard({ resp, command }: { resp: TabstatResponse; command: string }) {
+  const r = resp.result;
+  return (
+    <>
+      <ResultsCard title={r.by ? `Summary statistics by ${r.by}` : "Summary statistics"}>
+        {r.groups == null ? (
+          // No `by`: simple var × stat matrix
+          <table className="w-full font-mono text-[12px]">
+            <thead className="text-text-muted text-[11px] uppercase tracking-[0.04em]">
+              <tr>
+                <th className="text-left py-2 pr-3">Variable</th>
+                {r.stats.map((s) => (
+                  <th key={s} className="text-right py-2 px-2">{s}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {r.variables.map((v) => {
+                const row = (r.matrix as Record<string, Record<string, number | null>>)[v] || {};
+                return (
+                  <tr key={v} className="border-t border-border">
+                    <td className="py-1 pr-3 text-text">{v}</td>
+                    {r.stats.map((s) => (
+                      <td key={s} className="text-right py-1 px-2 text-text-muted">{fmt(row[s])}</td>
+                    ))}
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        ) : (
+          // With `by`: group × var × stat
+          <div className="space-y-4">
+            {(r.groups as string[]).map((g) => {
+              const block = (r.matrix as Record<string, Record<string, Record<string, number | null>>>)[g] || {};
+              return (
+                <div key={g}>
+                  <div className="text-[11px] uppercase tracking-[0.08em] text-text-faint mb-1">
+                    {r.by} = <span className="text-accent">{g}</span>
+                  </div>
+                  <table className="w-full font-mono text-[12px]">
+                    <thead className="text-text-muted text-[11px]">
+                      <tr>
+                        <th className="text-left py-1 pr-3">Variable</th>
+                        {r.stats.map((s) => (
+                          <th key={s} className="text-right py-1 px-2">{s}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {r.variables.map((v) => (
+                        <tr key={v} className="border-t border-border">
+                          <td className="py-1 pr-3 text-text">{v}</td>
+                          {r.stats.map((s) => (
+                            <td key={s} className="text-right py-1 px-2 text-text-muted">{fmt(block[v]?.[s])}</td>
+                          ))}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </ResultsCard>
+      <CommandLine command={command} />
+    </>
   );
 }
 
@@ -756,6 +1162,7 @@ function RegressionResult({ resp, command }: { resp: RegressResponse; command: s
         )}
       </ResultsCard>
       <CoefficientTable rows={resp.result.coefficients} columnLabel="Coef." />
+      <PostestActionsRow />
       <CommandLine command={command} />
     </>
   );
@@ -781,6 +1188,7 @@ function LogitResult({ resp, command }: { resp: LogitResponse; command: string }
         rows={resp.result.coefficients}
         columnLabel={h.odds_ratios ? "OR" : "Coef."}
       />
+      <PostestActionsRow />
       <CommandLine command={command} />
     </>
   );
@@ -854,6 +1262,694 @@ function TestResult({ resp, command }: { resp: TestResponse; command: string }) 
 }
 
 // =====================================================================
+// v3.0.2 — Descriptives (tabstat)
+// =====================================================================
+
+function TabstatForm({ columns }: { columns: ColumnInfo[] }) {
+  const pushAnalyze = useApp((s) => s.pushAnalyzeRecord);
+  const numerics = columns.filter((c) => c.kind === "numeric" || c.kind === "binary");
+  const categoricals = columns.filter((c) => c.kind !== "id" && c.kind !== "numeric");
+
+  const DEFAULT_STATS = ["n", "mean", "sd", "min", "median", "max"];
+  const [vars, setVars] = useState<string[]>([]);
+  const [by, setBy] = useState("");
+  const [chosenStats, setChosenStats] = useState<string[]>(DEFAULT_STATS);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const inFlight = useRef(false);
+
+  const toggleVar = (name: string) =>
+    setVars((cur) => (cur.includes(name) ? cur.filter((v) => v !== name) : [...cur, name]));
+  const toggleStat = (st: string) =>
+    setChosenStats((cur) => (cur.includes(st) ? cur.filter((s) => s !== st) : [...cur, st]));
+
+  const command = vars.length
+    ? `tabstat ${vars.join(" ")}, ${by ? `by(${by}) ` : ""}stats(${chosenStats.join(" ")})`
+    : "tabstat <vars>";
+
+  const onRun = async () => {
+    if (inFlight.current) return;
+    if (vars.length === 0) return;
+    inFlight.current = true;
+    setBusy(true); setError(null);
+    try {
+      const r = await api.tabstat({ variables: vars, by: by || null, stats: chosenStats });
+      pushAnalyze({ command: r.command, kind: "tabstat", payload: r, text: r.text, timestamp: Date.now() });
+    } catch (e) {
+      setError(e instanceof ApiError ? e.detail : String(e));
+    } finally {
+      inFlight.current = false;
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="bg-surface border border-border rounded-md p-6 max-w-[820px] space-y-5">
+      <div>
+        <div className="font-serif italic text-[16px] text-text mb-1">Summary by group</div>
+        <div className="text-[12px] text-text-muted">
+          Stata <code className="font-mono">tabstat</code> — n / mean / SD / min / median / max
+          per variable, optionally split by a grouping factor. This is Table 2 of
+          most clinical papers.
+        </div>
+      </div>
+
+      <FormRow label="Variables (numeric)">
+        <div className="flex flex-wrap gap-2">
+          {numerics.map((c) => {
+            const active = vars.includes(c.name);
+            return (
+              <button
+                key={c.name}
+                type="button"
+                onClick={() => toggleVar(c.name)}
+                className={`px-2 py-1 rounded-sm text-[11px] font-mono border ${
+                  active
+                    ? "bg-accent-soft border-accent text-text"
+                    : "bg-bg border-border text-text-muted hover:text-text hover:border-border-strong"
+                }`}
+              >
+                {c.name}
+              </button>
+            );
+          })}
+          {numerics.length === 0 && (
+            <div className="text-[12px] text-text-faint">No numeric variables in this dataset.</div>
+          )}
+        </div>
+      </FormRow>
+
+      <FormRow label="Group by (optional)">
+        <Select
+          value={by}
+          onChange={setBy}
+          options={[{ value: "", label: "— none —" }, ...categoricals.map((c) => ({ value: c.name, label: c.name }))]}
+        />
+      </FormRow>
+
+      <FormRow label="Statistics">
+        <div className="flex flex-wrap gap-2">
+          {DEFAULT_STATS.map((st) => {
+            const active = chosenStats.includes(st);
+            return (
+              <button
+                key={st}
+                type="button"
+                onClick={() => toggleStat(st)}
+                className={`px-2 py-1 rounded-sm text-[11px] font-mono border ${
+                  active
+                    ? "bg-accent-soft border-accent text-text"
+                    : "bg-bg border-border text-text-muted hover:text-text"
+                }`}
+              >
+                {st}
+              </button>
+            );
+          })}
+        </div>
+      </FormRow>
+
+      <div className="pt-2">
+        <Tooltip
+          what="By-group descriptives matrix: rows are variables, columns are stats, optionally split by a grouping factor."
+          how="Pick one or more numeric variables, choose an optional grouping factor, and run."
+          example={<>Pick <code className="font-mono">plaque_index, gingival_index</code>, group by <code className="font-mono">smoking</code> &mdash; instant Table 2.</>}
+        >
+          <button
+            type="button"
+            disabled={busy || vars.length === 0}
+            onClick={onRun}
+            className="run-btn-primary disabled:opacity-60"
+          >
+            {busy ? "Computing…" : "Run tabstat"}
+          </button>
+        </Tooltip>
+        {error && <div className="mt-3 text-[12px] text-warn">{error}</div>}
+      </div>
+
+      <div className="text-[11px] text-text-faint font-mono">Pro syntax: {command}</div>
+    </div>
+  );
+}
+
+
+// =====================================================================
+// v3.0.2 — Comparisons picker (one-way / two-way / RM ANOVA)
+// =====================================================================
+
+function ComparisonPicker({
+  pick, setPick, columns,
+}: { pick: ComparisonPick; setPick: (p: ComparisonPick) => void; columns: ColumnInfo[] }) {
+  return (
+    <>
+      <div className="flex gap-2 flex-wrap">
+        <PickerButton active={pick === "oneway"} onClick={() => setPick("oneway")} title="One-way ANOVA">
+          One-way ANOVA
+        </PickerButton>
+        <PickerButton active={pick === "anova_two"} onClick={() => setPick("anova_two")} title="Two-way ANOVA">
+          Two-way ANOVA
+        </PickerButton>
+        <PickerButton active={pick === "anova_rm"} onClick={() => setPick("anova_rm")} title="Repeated-measures ANOVA">
+          Repeated-measures ANOVA
+        </PickerButton>
+      </div>
+
+      <div className="bg-surface border border-border rounded-md p-6 max-w-[820px]">
+        {pick === "oneway" && <OnewayForm columns={columns} />}
+        {pick === "anova_two" && <AnovaTwoForm columns={columns} />}
+        {pick === "anova_rm" && <AnovaRmForm columns={columns} />}
+      </div>
+    </>
+  );
+}
+
+
+// =====================================================================
+// One-way ANOVA form (with Bartlett's footer, post-hoc, "by each level")
+// =====================================================================
+
+function OnewayForm({ columns }: { columns: ColumnInfo[] }) {
+  const pushAnalyze = useApp((s) => s.pushAnalyzeRecord);
+  const numerics = columns.filter((c) => c.kind === "numeric");
+  const groupable = columns.filter((c) => c.kind !== "id" && c.kind !== "numeric");
+
+  const [depvar, setDepvar] = useState(numerics[0]?.name ?? "");
+  const [groupvar, setGroupvar] = useState(groupable[0]?.name ?? "");
+  const [posthoc, setPosthoc] = useState<"none" | "bonferroni" | "scheffe" | "sidak">("none");
+  const [perLevel, setPerLevel] = useState("");          // A1.5 — "Run for each level of X"
+  const [busy, setBusy] = useState(false);
+  const [progress, setProgress] = useState<string>("");
+  const [error, setError] = useState<string | null>(null);
+  const inFlight = useRef(false);
+
+  const command = perLevel
+    ? `foreach lvl in <levels of ${perLevel}> {\n  oneway ${depvar} ${groupvar} if ${perLevel} == "\`lvl'"${posthoc !== "none" ? `, ${posthoc}` : ""}\n}`
+    : `oneway ${depvar} ${groupvar}${posthoc !== "none" ? `, ${posthoc}` : ""}`;
+
+  const onRun = async () => {
+    if (inFlight.current) return;
+    if (!depvar || !groupvar) return;
+    inFlight.current = true;
+    setBusy(true); setError(null); setProgress("");
+    try {
+      if (perLevel) {
+        // Fetch the distinct levels of perLevel from the dataset's frame.
+        // Quick path: re-run a tabstat to learn the levels; simpler still
+        // is hitting /api/data/preview, but tabulate gives us a cleaner list.
+        const t = await api.tabulate(perLevel);
+        const levels: (string | number)[] = (t.result.rows || []).map((r) => r.value as string | number);
+        let count = 0;
+        for (const lvl of levels) {
+          setProgress(`Running for ${perLevel} = ${String(lvl)} (${count + 1} / ${levels.length})…`);
+          const ifExpr = typeof lvl === "number"
+            ? `${perLevel} == ${lvl}`
+            : `${perLevel} == "${String(lvl).replace(/"/g, '\\"')}"`;
+          const r = await api.oneway({
+            depvar, groupvar, posthoc,
+            if_expr: ifExpr,
+          });
+          pushAnalyze({
+            command: `${r.command}   /* ${perLevel} = ${String(lvl)} */`,
+            kind: "oneway",
+            payload: { ...r, _perLevelLabel: `${perLevel} = ${String(lvl)}` },
+            text: r.text,
+            timestamp: Date.now() + count,    // unique timestamps for stable keys
+          });
+          count++;
+        }
+        setProgress(`Done — ${count} ANOVAs at each level of ${perLevel}.`);
+      } else {
+        const r = await api.oneway({ depvar, groupvar, posthoc });
+        pushAnalyze({ command: r.command, kind: "oneway", payload: r, text: r.text, timestamp: Date.now() });
+      }
+    } catch (e) {
+      setError(e instanceof ApiError ? e.detail : String(e));
+    } finally {
+      inFlight.current = false;
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="space-y-5">
+      <FormRow label="Outcome (numeric)">
+        <Select value={depvar} onChange={setDepvar} options={numerics.map((c) => ({ value: c.name, label: c.name }))} />
+      </FormRow>
+      <FormRow label="Grouping variable">
+        <Select value={groupvar} onChange={setGroupvar} options={groupable.map((c) => ({ value: c.name, label: c.name }))} />
+      </FormRow>
+      <FormRow label="Post-hoc multiple-comparison correction">
+        <Select
+          value={posthoc}
+          onChange={(v) => setPosthoc(v as typeof posthoc)}
+          options={[
+            { value: "none", label: "None" },
+            { value: "bonferroni", label: "Bonferroni" },
+            { value: "scheffe", label: "Scheffé" },
+            { value: "sidak", label: "Sidak" },
+          ]}
+        />
+      </FormRow>
+      <FormRow label="Run separately for each level of (optional)">
+        <Select
+          value={perLevel}
+          onChange={setPerLevel}
+          options={[
+            { value: "", label: "— no, just one ANOVA —" },
+            ...groupable.filter((c) => c.name !== groupvar && c.name !== depvar)
+                        .map((c) => ({ value: c.name, label: c.name })),
+          ]}
+        />
+      </FormRow>
+
+      <div className="pt-2">
+        <Tooltip
+          what="One-way analysis of variance. Tests whether the mean of the outcome differs across levels of one grouping factor. Bartlett's test for equal variances is appended automatically."
+          how="Pick a numeric outcome and a categorical grouping variable. Choose a post-hoc correction if you want pairwise comparisons. Toggle 'Run separately for each level of X' to loop the ANOVA across another factor (one card per level)."
+          example={<>Outcome = <code className="font-mono">mean_VHN</code>, group = <code className="font-mono">group_id</code>, post-hoc = Bonferroni. Repeated across the 8 ratios via "Run separately for each level of <code className="font-mono">ratio</code>".</>}
+        >
+          <button
+            type="button"
+            disabled={busy || !depvar || !groupvar}
+            onClick={onRun}
+            className="run-btn-primary disabled:opacity-60"
+          >
+            {busy ? "Computing…" : perLevel ? `Run for each level of ${perLevel}` : "Run one-way ANOVA"}
+          </button>
+        </Tooltip>
+        {progress && <div className="mt-3 text-[12px] text-text-muted">{progress}</div>}
+        {error && <div className="mt-3 text-[12px] text-warn">{error}</div>}
+      </div>
+
+      <div className="text-[11px] text-text-faint font-mono whitespace-pre">Pro syntax: {command}</div>
+    </div>
+  );
+}
+
+
+// =====================================================================
+// Two-way ANOVA form
+// =====================================================================
+
+function AnovaTwoForm({ columns }: { columns: ColumnInfo[] }) {
+  const pushAnalyze = useApp((s) => s.pushAnalyzeRecord);
+  const numerics = columns.filter((c) => c.kind === "numeric");
+  const factorable = columns.filter((c) => c.kind !== "id" && c.kind !== "numeric");
+
+  const [depvar, setDepvar] = useState(numerics[0]?.name ?? "");
+  const [factorA, setFactorA] = useState(factorable[0]?.name ?? "");
+  const [factorB, setFactorB] = useState(factorable[1]?.name ?? factorable[0]?.name ?? "");
+  const [interaction, setInteraction] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const inFlight = useRef(false);
+
+  const command = `anova ${depvar} ${factorA}${interaction ? "##" : "+"}${factorB}`;
+
+  const onRun = async () => {
+    if (inFlight.current) return;
+    if (!depvar || !factorA || !factorB) return;
+    inFlight.current = true;
+    setBusy(true); setError(null);
+    try {
+      const r = await api.anovaTwo({ depvar, factor_a: factorA, factor_b: factorB, interaction });
+      pushAnalyze({ command: r.command, kind: "anova_two", payload: r, text: r.text, timestamp: Date.now() });
+    } catch (e) {
+      setError(e instanceof ApiError ? e.detail : String(e));
+    } finally {
+      inFlight.current = false;
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="space-y-5">
+      <FormRow label="Outcome (numeric)">
+        <Select value={depvar} onChange={setDepvar} options={numerics.map((c) => ({ value: c.name, label: c.name }))} />
+      </FormRow>
+      <FormRow label="Factor A">
+        <Select value={factorA} onChange={setFactorA} options={factorable.map((c) => ({ value: c.name, label: c.name }))} />
+      </FormRow>
+      <FormRow label="Factor B">
+        <Select value={factorB} onChange={setFactorB} options={factorable.map((c) => ({ value: c.name, label: c.name }))} />
+      </FormRow>
+      <FormRow label="Include interaction term">
+        <label className="inline-flex items-center gap-2 text-[13px] text-text-muted">
+          <input type="checkbox" checked={interaction} onChange={(e) => setInteraction(e.target.checked)} className="accent-accent" />
+          {factorA} × {factorB}
+        </label>
+      </FormRow>
+      <div className="pt-2">
+        <Tooltip
+          what="Two-way ANOVA: tests main effects of two factors and (optionally) their interaction on a continuous outcome."
+          how="Pick the outcome, the two factors, and decide whether to include the interaction. Keep it on for dose-response / time-course designs."
+          example={<>Outcome = <code className="font-mono">mean_VHN</code>, A = <code className="font-mono">group_id</code>, B = <code className="font-mono">ratio</code>, with interaction.</>}
+        >
+          <button
+            type="button"
+            disabled={busy || !depvar || !factorA || !factorB}
+            onClick={onRun}
+            className="run-btn-primary disabled:opacity-60"
+          >
+            {busy ? "Computing…" : "Run two-way ANOVA"}
+          </button>
+        </Tooltip>
+        {error && <div className="mt-3 text-[12px] text-warn">{error}</div>}
+      </div>
+      <div className="text-[11px] text-text-faint font-mono">Pro syntax: {command}</div>
+    </div>
+  );
+}
+
+
+// =====================================================================
+// Repeated-measures ANOVA form
+// =====================================================================
+
+function AnovaRmForm({ columns }: { columns: ColumnInfo[] }) {
+  const pushAnalyze = useApp((s) => s.pushAnalyzeRecord);
+  const numerics = columns.filter((c) => c.kind === "numeric");
+  const idable = columns.filter((c) => c.kind !== "numeric");
+
+  const [depvar, setDepvar] = useState(numerics[0]?.name ?? "");
+  const [subject, setSubject] = useState(idable.find((c) => c.kind === "id")?.name ?? idable[0]?.name ?? "");
+  const [within, setWithin] = useState(idable[0]?.name ?? "");
+  const [between, setBetween] = useState("");
+  const [correction, setCorrection] = useState<"none" | "gg" | "hf">("none");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const inFlight = useRef(false);
+
+  const command = `anova ${depvar} ${subject}##${within}${between ? `##${between}` : ""}, repeated(${within})${correction !== "none" ? ` ${correction}` : ""}`;
+
+  const onRun = async () => {
+    if (inFlight.current) return;
+    if (!depvar || !subject || !within) return;
+    inFlight.current = true;
+    setBusy(true); setError(null);
+    try {
+      const r = await api.anovaRm({ depvar, subject, within, between: between || null, correction });
+      pushAnalyze({ command: r.command, kind: "anova_rm", payload: r, text: r.text, timestamp: Date.now() });
+    } catch (e) {
+      setError(e instanceof ApiError ? e.detail : String(e));
+    } finally {
+      inFlight.current = false;
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="space-y-5">
+      <FormRow label="Outcome (numeric)">
+        <Select value={depvar} onChange={setDepvar} options={numerics.map((c) => ({ value: c.name, label: c.name }))} />
+      </FormRow>
+      <FormRow label="Subject ID (one row per subject × within-level)">
+        <Select value={subject} onChange={setSubject} options={idable.map((c) => ({ value: c.name, label: c.name }))} />
+      </FormRow>
+      <FormRow label="Within-subject factor (e.g. timepoint)">
+        <Select value={within} onChange={setWithin} options={idable.map((c) => ({ value: c.name, label: c.name }))} />
+      </FormRow>
+      <FormRow label="Between-subject factor (optional)">
+        <Select
+          value={between}
+          onChange={setBetween}
+          options={[{ value: "", label: "— none —" },
+                    ...idable.filter((c) => c.name !== subject && c.name !== within)
+                              .map((c) => ({ value: c.name, label: c.name }))]}
+        />
+      </FormRow>
+      <FormRow label="Sphericity correction">
+        <Select
+          value={correction}
+          onChange={(v) => setCorrection(v as typeof correction)}
+          options={[
+            { value: "none", label: "None" },
+            { value: "gg", label: "Greenhouse-Geisser" },
+            { value: "hf", label: "Huynh-Feldt" },
+          ]}
+        />
+      </FormRow>
+      <div className="pt-2">
+        <Tooltip
+          what="Repeated-measures ANOVA: tests the effect of a within-subjects factor (e.g. time) and optionally a between-subjects factor on a continuous outcome. Sphericity correction adjusts the p-value when within-level variances differ."
+          how="Each subject must contribute one row per within-level. Pick subject ID, within-factor, optional between-factor, and a correction."
+          example={<>Outcome = <code className="font-mono">mean_VHN</code>, subject = <code className="font-mono">specimen_id</code>, within = <code className="font-mono">timepoint</code>, between = <code className="font-mono">group_id</code>.</>}
+        >
+          <button
+            type="button"
+            disabled={busy || !depvar || !subject || !within}
+            onClick={onRun}
+            className="run-btn-primary disabled:opacity-60"
+          >
+            {busy ? "Computing…" : "Run RM-ANOVA"}
+          </button>
+        </Tooltip>
+        {error && <div className="mt-3 text-[12px] text-warn">{error}</div>}
+      </div>
+      <div className="text-[11px] text-text-faint font-mono">Pro syntax: {command}</div>
+    </div>
+  );
+}
+
+
+// =====================================================================
+// Diagnostics picker (Shapiro / Levene)
+// =====================================================================
+
+function DiagnosticPicker({
+  pick, setPick, columns,
+}: { pick: DiagnosticPick; setPick: (p: DiagnosticPick) => void; columns: ColumnInfo[] }) {
+  return (
+    <>
+      <div className="flex gap-2 flex-wrap">
+        <PickerButton active={pick === "shapiro"} onClick={() => setPick("shapiro")} title="Shapiro-Wilk">
+          Normality (Shapiro-Wilk)
+        </PickerButton>
+        <PickerButton active={pick === "levene"} onClick={() => setPick("levene")} title="Levene's">
+          Variance homogeneity (Levene's)
+        </PickerButton>
+      </div>
+      <div className="bg-surface border border-border rounded-md p-6 max-w-[820px]">
+        {pick === "shapiro" && <ShapiroForm columns={columns} />}
+        {pick === "levene" && <LeveneForm columns={columns} />}
+      </div>
+    </>
+  );
+}
+
+function ShapiroForm({ columns }: { columns: ColumnInfo[] }) {
+  const pushAnalyze = useApp((s) => s.pushAnalyzeRecord);
+  const numerics = columns.filter((c) => c.kind === "numeric");
+  const groupable = columns.filter((c) => c.kind !== "id" && c.kind !== "numeric");
+
+  const [variable, setVariable] = useState(numerics[0]?.name ?? "");
+  const [by, setBy] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const inFlight = useRef(false);
+
+  const command = `swilk ${variable}${by ? `, by(${by})` : ""}`;
+
+  const onRun = async () => {
+    if (inFlight.current) return;
+    if (!variable) return;
+    inFlight.current = true;
+    setBusy(true); setError(null);
+    try {
+      const r = await api.shapiro({ var: variable, by: by || null });
+      pushAnalyze({ command: r.command, kind: "shapiro", payload: r, text: r.text, timestamp: Date.now() });
+    } catch (e) {
+      setError(e instanceof ApiError ? e.detail : String(e));
+    } finally {
+      inFlight.current = false;
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="space-y-5">
+      <FormRow label="Variable (numeric)">
+        <Select value={variable} onChange={setVariable} options={numerics.map((c) => ({ value: c.name, label: c.name }))} />
+      </FormRow>
+      <FormRow label="Group by (optional)">
+        <Select value={by} onChange={setBy} options={[{ value: "", label: "— overall —" }, ...groupable.map((c) => ({ value: c.name, label: c.name }))]} />
+      </FormRow>
+      <div className="pt-2">
+        <Tooltip
+          what="Shapiro-Wilk test for normality of a numeric variable. p > 0.05 = consistent with normal."
+          how="Pick a variable; optionally split by a categorical to test each subgroup separately."
+          example={<>Run on <code className="font-mono">mean_VHN</code> before deciding between t-test and Mann-Whitney.</>}
+        >
+          <button type="button" disabled={busy || !variable} onClick={onRun} className="run-btn-primary disabled:opacity-60">
+            {busy ? "Computing…" : "Run Shapiro-Wilk"}
+          </button>
+        </Tooltip>
+        {error && <div className="mt-3 text-[12px] text-warn">{error}</div>}
+      </div>
+      <div className="text-[11px] text-text-faint font-mono">Pro syntax: {command}</div>
+    </div>
+  );
+}
+
+function LeveneForm({ columns }: { columns: ColumnInfo[] }) {
+  const pushAnalyze = useApp((s) => s.pushAnalyzeRecord);
+  const numerics = columns.filter((c) => c.kind === "numeric");
+  const groupable = columns.filter((c) => c.kind !== "id" && c.kind !== "numeric");
+
+  const [depvar, setDepvar] = useState(numerics[0]?.name ?? "");
+  const [groupvar, setGroupvar] = useState(groupable[0]?.name ?? "");
+  const [center, setCenter] = useState<"median" | "mean" | "trimmed">("median");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const inFlight = useRef(false);
+
+  const command = `robvar ${depvar}, by(${groupvar})${center !== "median" ? ` center(${center})` : ""}`;
+
+  const onRun = async () => {
+    if (inFlight.current) return;
+    if (!depvar || !groupvar) return;
+    inFlight.current = true;
+    setBusy(true); setError(null);
+    try {
+      const r = await api.levene({ depvar, groupvar, center });
+      pushAnalyze({ command: r.command, kind: "levene", payload: r, text: r.text, timestamp: Date.now() });
+    } catch (e) {
+      setError(e instanceof ApiError ? e.detail : String(e));
+    } finally {
+      inFlight.current = false;
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="space-y-5">
+      <FormRow label="Outcome (numeric)">
+        <Select value={depvar} onChange={setDepvar} options={numerics.map((c) => ({ value: c.name, label: c.name }))} />
+      </FormRow>
+      <FormRow label="Grouping variable">
+        <Select value={groupvar} onChange={setGroupvar} options={groupable.map((c) => ({ value: c.name, label: c.name }))} />
+      </FormRow>
+      <FormRow label="Center">
+        <Select
+          value={center}
+          onChange={(v) => setCenter(v as typeof center)}
+          options={[
+            { value: "median", label: "Median (robust — Brown-Forsythe, default)" },
+            { value: "mean", label: "Mean (classic Levene)" },
+            { value: "trimmed", label: "Trimmed mean" },
+          ]}
+        />
+      </FormRow>
+      <div className="pt-2">
+        <Tooltip
+          what="Levene's test for equality of variance across groups. p < 0.05 = variances differ; consider Welch's correction or non-parametric tests."
+          how="Pick a numeric outcome, a grouping factor, and a center (median is the robust default; mean is classic)."
+          example={<>Outcome = <code className="font-mono">mean_VHN</code>, group = <code className="font-mono">group_id</code>, center = median.</>}
+        >
+          <button type="button" disabled={busy || !depvar || !groupvar} onClick={onRun} className="run-btn-primary disabled:opacity-60">
+            {busy ? "Computing…" : "Run Levene's"}
+          </button>
+        </Tooltip>
+        {error && <div className="mt-3 text-[12px] text-warn">{error}</div>}
+      </div>
+      <div className="text-[11px] text-text-faint font-mono">Pro syntax: {command}</div>
+    </div>
+  );
+}
+
+
+// =====================================================================
+// Post-estimation action row — appears beneath every regress/logit card.
+// Operates on `lastEstimation` (most recent fit), same semantics as the
+// dedicated Postestimation tab. Clicking pushes a new analyze record so
+// the result shows up at the top of the recent-results list.
+// =====================================================================
+
+function PostestActionsRow() {
+  const last = useApp((s) => s.lastEstimation);
+  const refreshColumns = useApp((s) => s.refreshColumns);
+  const dataset = useApp((s) => s.dataset);
+  const setDataset = useApp((s) => s.setDataset);
+  const pushAnalyze = useApp((s) => s.pushAnalyzeRecord);
+
+  const [busy, setBusy] = useState<"" | "margins" | "predict" | "test">("");
+  const [error, setError] = useState<string | null>(null);
+  const [testCoef, setTestCoef] = useState<string>("");
+  const inFlight = useRef(false);
+
+  if (!last) return null;
+  const designCoefs = last.designColumns.filter((c) => c !== "_cons");
+  const currentTestCoef = testCoef || designCoefs[0] || "";
+
+  const guard = async (key: "margins" | "predict" | "test", fn: () => Promise<void>) => {
+    if (inFlight.current) return;
+    inFlight.current = true;
+    setBusy(key); setError(null);
+    try {
+      await fn();
+    } catch (e) {
+      setError(e instanceof ApiError ? e.detail : String(e));
+    } finally {
+      inFlight.current = false;
+      setBusy("");
+    }
+  };
+
+  const onMargins = () => guard("margins", async () => {
+    const r = await api.margins(false);
+    pushAnalyze({ command: r.command, kind: "margins", payload: r, text: r.text, timestamp: Date.now() });
+  });
+
+  const onPredict = () => guard("predict", async () => {
+    const r = await api.predictFitted({
+      kind: last.cmd_kind === "logit" ? "pr" : "xb",
+      new_var: last.cmd_kind === "logit" ? "predicted_pr" : "fitted_values",
+    });
+    const refreshed = await api.columns();
+    refreshColumns(refreshed.columns);
+    if (dataset) {
+      setDataset(
+        { ...dataset, n_vars: refreshed.columns.length, columns: refreshed.columns.map((c) => c.name) },
+        refreshed.columns,
+      );
+    }
+    pushAnalyze({ command: r.command, kind: "predict", payload: r, text: r.text, timestamp: Date.now() });
+  });
+
+  const onTest = () => guard("test", async () => {
+    if (!currentTestCoef) return;
+    const r = await api.test([`${currentTestCoef} = 0`]);
+    pushAnalyze({ command: r.command, kind: "test", payload: r, text: r.text, timestamp: Date.now() });
+  });
+
+  return (
+    <div className="mt-3 flex flex-wrap items-center gap-2 pt-3 border-t border-border">
+      <span className="text-[10px] uppercase tracking-[0.08em] text-text-faint mr-1">Postestimation</span>
+      <button type="button" onClick={onMargins} disabled={busy !== ""} className="run-btn-secondary !w-auto !py-[6px] !px-3 !text-[12px] disabled:opacity-60">
+        {busy === "margins" ? "Computing…" : "Margins"}
+      </button>
+      <button type="button" onClick={onPredict} disabled={busy !== ""} className="run-btn-secondary !w-auto !py-[6px] !px-3 !text-[12px] disabled:opacity-60">
+        {busy === "predict" ? "Computing…" : last.cmd_kind === "logit" ? "Predict probability" : "Predict fitted"}
+      </button>
+      <div className="inline-flex items-center gap-1">
+        <select
+          value={currentTestCoef}
+          onChange={(e) => setTestCoef(e.target.value)}
+          className="bg-bg border border-border rounded-sm px-2 py-[6px] text-[11px] font-mono text-text"
+        >
+          {designCoefs.map((c) => <option key={c} value={c}>{c}</option>)}
+        </select>
+        <button type="button" onClick={onTest} disabled={busy !== "" || !currentTestCoef} className="run-btn-secondary !w-auto !py-[6px] !px-3 !text-[12px] disabled:opacity-60">
+          {busy === "test" ? "Testing…" : `Test = 0`}
+        </button>
+      </div>
+      {error && <span className="text-[11px] text-warn ml-2">{error}</span>}
+    </div>
+  );
+}
+
+
+// =====================================================================
 // Tables / utilities
 // =====================================================================
 
@@ -864,23 +1960,25 @@ function CoefficientTable({ rows, columnLabel }: { rows: CoefRow[]; columnLabel:
         <div className="font-serif italic text-[13px] text-text">Coefficient table</div>
       </div>
       <div className="p-[14px]">
-        <table className="w-full font-mono text-[12px]">
-          <thead className="text-text-muted">
+        <table className="w-full font-mono text-[13px]">
+          <thead className="text-text-muted text-[12px] uppercase tracking-[0.04em]">
             <tr>
-              <th className="text-left py-1 pr-3 w-4"></th>
-              <th className="text-left py-1 pr-3">Variable</th>
-              <th className="text-right py-1 px-2">{columnLabel}</th>
-              <th className="text-right py-1 px-2">SE</th>
-              <th className="text-right py-1 px-2">{columnLabel === "OR" ? "z" : "t"}</th>
-              <th className="text-right py-1 px-2">P</th>
-              <th className="text-right py-1 px-2">95% CI</th>
+              <th className="text-left py-2 pr-3 w-4"></th>
+              <th className="text-left py-2 pr-4">Variable</th>
+              <th className="text-right py-2 px-3">{columnLabel}</th>
+              <th className="text-right py-2 px-3">SE</th>
+              <th className="text-right py-2 px-3">{columnLabel === "OR" ? "z" : "t"}</th>
+              <th className="text-right py-2 px-3">P</th>
+              <th className="text-right py-2 px-3">95% CI</th>
             </tr>
           </thead>
           <tbody>
             {rows.map((r) => (
               <tr key={r.name} className="border-t border-border">
                 <td className="py-[6px] pr-1 text-center">
-                  <SignificanceDot p={r.p} />
+                  {/* _cons is the baseline mean, not a hypothesis test in the
+                      same sense as the predictors — suppress its dot. */}
+                  {r.name === "_cons" ? <span className="inline-block w-[6px] h-[6px]" /> : <SignificanceDot p={r.p} />}
                 </td>
                 <td className="py-[6px] pr-3 text-text">{r.name}</td>
                 <td className="text-right py-[6px] px-2 text-text">{fmt(r.coef)}</td>

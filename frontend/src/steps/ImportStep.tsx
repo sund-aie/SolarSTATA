@@ -95,8 +95,17 @@ export function ImportStep() {
   };
 
   const onCancelPicker = () => {
+    // Reset every piece of state the picker touched: phase back to drop,
+    // any error cleared, the busy flag cleared (in case the user hits
+    // Cancel while we're still racing the upload), and the file-input ref
+    // value blanked so re-selecting the same file fires a fresh change
+    // event. Without that last bit the dropzone looked "stuck" on the
+    // second attempt because <input type=file> dedupes identical paths.
     setPhase({ kind: "drop" });
     setError(null);
+    setBusy(false);
+    setDragOver(false);
+    if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
   return (

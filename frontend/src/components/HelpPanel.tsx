@@ -1,8 +1,9 @@
 /* Help side panel — slides in from the right.
  *
- * Two tabs:
+ * Three tabs:
  *   - Walkthroughs: 5 narrative tutorials based on clinic_patients.csv.
- *   - Commands: searchable command reference (Phase 3 + Phase 4 commands).
+ *   - Commands: searchable command reference.
+ *   - Which test?: decision tree mapping research questions → SolarSTATA commands.
  *
  * Trigger: topbar `?` button, the floating tip, or pressing `?` (handled at
  * the App level via a keyboard listener).
@@ -17,7 +18,7 @@ interface Props {
   onClose: () => void;
 }
 
-type Tab = "walkthroughs" | "commands";
+type Tab = "walkthroughs" | "commands" | "which_test";
 
 export function HelpPanel({ onClose }: Props) {
   const [tab, setTab] = useState<Tab>("walkthroughs");
@@ -48,12 +49,16 @@ export function HelpPanel({ onClose }: Props) {
         <TabButton active={tab === "commands"} onClick={() => { setTab("commands"); setActive(null); }}>
           Commands
         </TabButton>
+        <TabButton active={tab === "which_test"} onClick={() => { setTab("which_test"); setActive(null); }}>
+          Which test?
+        </TabButton>
       </div>
 
       <div className="flex-1 overflow-y-auto">
         {tab === "walkthroughs" && !active && <WalkthroughList onPick={setActive} />}
         {tab === "walkthroughs" && active && <WalkthroughRunner walkthrough={active} onBack={() => setActive(null)} />}
         {tab === "commands" && <CommandReference />}
+        {tab === "which_test" && <WhichTestTree />}
       </div>
     </div>
   );
@@ -289,6 +294,21 @@ const COMMANDS: CommandDoc[] = [
     example: "estat ic" },
   { cmd: "estat vif", syntax: "estat vif", desc: "Variance inflation factors (after regress).",
     example: "estat vif" },
+  { cmd: "tabstat", syntax: "tabstat varlist [, by(group) stats(n mean sd min max median p25 p75 sum)]",
+    desc: "By-group descriptives matrix. Pick any subset of stats; without by() you get one row per variable.",
+    example: "tabstat plaque_index gingival_index, by(sex) stats(n mean sd)" },
+  { cmd: "oneway", syntax: "oneway depvar groupvar [, bonferroni | scheffe | sidak]",
+    desc: "One-way ANOVA. Bartlett's test for equal variances is always appended. Optional posthoc pairwise comparisons.",
+    example: "oneway plaque_index brushing_freq, bonferroni" },
+  { cmd: "anova", syntax: "anova depvar factor_a##factor_b   |   anova depvar subj##time, repeated(time) [gg|hf]",
+    desc: "Two-way ANOVA with optional interaction (a##b) or repeated-measures with sphericity correction (gg = Greenhouse-Geisser, hf = Huynh-Feldt).",
+    example: "anova plaque_index sex##brushing_freq" },
+  { cmd: "swilk", syntax: "swilk var [, by(group)]",
+    desc: "Shapiro-Wilk test for normality. Optional by-group reports the test per level.",
+    example: "swilk plaque_index, by(sex)" },
+  { cmd: "robvar", syntax: "robvar depvar, by(group) [, median | mean | trimmed]",
+    desc: "Levene's test for equal variances across groups. Default center = median (Brown-Forsythe variant).",
+    example: "robvar plaque_index, by(brushing_freq)" },
 ];
 
 function CommandReference() {
@@ -325,6 +345,210 @@ function CommandReference() {
       {filtered.length === 0 && (
         <div className="text-[12px] text-text-faint italic">No commands match "{q}".</div>
       )}
+    </div>
+  );
+}
+
+// =====================================================================
+// "Which test?" decision tree
+// =====================================================================
+
+interface TestNode {
+  q: string;
+  branches: { label: string; out?: { cmd: string; why: string }; next?: TestNode }[];
+}
+
+const TREE: TestNode = {
+  q: "What kind of outcome?",
+  branches: [
+    {
+      label: "Continuous (e.g. plaque index, blood pressure)",
+      next: {
+        q: "How many groups are you comparing?",
+        branches: [
+          {
+            label: "Two independent groups",
+            next: {
+              q: "Are the values approximately normal? (swilk p > 0.05)",
+              branches: [
+                {
+                  label: "Yes — normal",
+                  out: { cmd: "ttest (lands in v3.1)",
+                         why: "For now: oneway y g with two levels gives the same F = t² result. Bartlett's test built-in checks equal variances." },
+                },
+                {
+                  label: "No — skewed",
+                  out: { cmd: "Mann-Whitney (lands in v3.1)",
+                         why: "Until v3.1, oneway with bonferroni posthoc is the closest we ship — but the assumption violation matters for small n." },
+                },
+              ],
+            },
+          },
+          {
+            label: "Three or more independent groups",
+            next: {
+              q: "Are within-group values approximately normal?",
+              branches: [
+                {
+                  label: "Yes — and variances roughly equal (Bartlett p > 0.05)",
+                  out: { cmd: "oneway y g",
+                         why: "Bartlett's test always runs; check it on the result card. Add , bonferroni / scheffe / sidak for pairwise posthoc." },
+                },
+                {
+                  label: "Yes — but variances differ",
+                  out: { cmd: "oneway y g (note Bartlett's p)",
+                         why: "Welch's ANOVA lands in v3.1. For now, report the Bartlett violation alongside the oneway result." },
+                },
+                {
+                  label: "No — non-normal",
+                  out: { cmd: "Kruskal-Wallis (lands in v3.1)",
+                         why: "For now: tabstat by group + a box plot to describe; non-parametric inference arrives in v3.1." },
+                },
+              ],
+            },
+          },
+          {
+            label: "Repeated measures on the same subject (e.g. timepoints)",
+            next: {
+              q: "Do you also have between-subject groups?",
+              branches: [
+                {
+                  label: "No — just within-subject (time only)",
+                  out: { cmd: "anova_rm with within = time",
+                         why: "Add gg or hf correction if sphericity is in doubt (it usually is)." },
+                },
+                {
+                  label: "Yes — within × between (e.g. groups × timepoints)",
+                  out: { cmd: "anova_rm with within = time, between = group",
+                         why: "We fit the within model and surface the between effect via subject-level means (split-plot workaround). Full mixed-effects lands in v3.1." },
+                },
+              ],
+            },
+          },
+          {
+            label: "Continuous predictor (not groups)",
+            out: { cmd: "regress y x1 x2 … , vce(robust)",
+                   why: "OLS with HC3 / cluster SE if needed. Add i.factor for categorical predictors. margins / predict / test available under the result card." },
+          },
+        ],
+      },
+    },
+    {
+      label: "Binary (yes/no, presence/absence)",
+      next: {
+        q: "What's your goal?",
+        branches: [
+          {
+            label: "Compare proportions across groups",
+            out: { cmd: "tabulate x y",
+                   why: "Two-way contingency with chi-squared. Use for sex × caries, treatment × cure, etc." },
+          },
+          {
+            label: "Model probability from continuous predictors",
+            out: { cmd: "logit y x1 x2 … , or",
+                   why: "Logistic regression with odds ratios. Add vce(robust) for clustered data; margins gives predicted probabilities." },
+          },
+        ],
+      },
+    },
+    {
+      label: "Just describing one variable (no comparison)",
+      out: { cmd: "summarize y, detail  •  swilk y  •  histogram y",
+             why: "Start with descriptives + a Shapiro check to decide if downstream tests should be parametric or not." },
+    },
+  ],
+};
+
+function WhichTestTree() {
+  const [path, setPath] = useState<TestNode[]>([TREE]);
+  const [pickedLabels, setPickedLabels] = useState<string[]>([]);
+  const [terminal, setTerminal] = useState<{ cmd: string; why: string } | null>(null);
+
+  const current = path[path.length - 1];
+
+  const reset = () => {
+    setPath([TREE]);
+    setPickedLabels([]);
+    setTerminal(null);
+  };
+
+  const pick = (branch: TestNode["branches"][number]) => {
+    setPickedLabels((p) => [...p, branch.label]);
+    if (branch.out) {
+      setTerminal(branch.out);
+    } else if (branch.next) {
+      setPath((p) => [...p, branch.next!]);
+    }
+  };
+
+  const goBack = () => {
+    if (terminal) {
+      setTerminal(null);
+      setPickedLabels((p) => p.slice(0, -1));
+      return;
+    }
+    if (path.length > 1) {
+      setPath((p) => p.slice(0, -1));
+      setPickedLabels((p) => p.slice(0, -1));
+    }
+  };
+
+  return (
+    <div className="p-4 space-y-3">
+      <div className="text-[12px] text-text-muted">
+        Click through the questions to find the right test for your data.
+        Tests not yet shipping in v3.0.2 are flagged with their planned
+        release.
+      </div>
+
+      {pickedLabels.length > 0 && (
+        <div className="text-[11px] text-text-faint font-mono whitespace-pre-wrap leading-relaxed">
+          {pickedLabels.map((l, i) => `${"  ".repeat(i)}↳ ${l}`).join("\n")}
+        </div>
+      )}
+
+      {!terminal ? (
+        <>
+          <div className="font-serif italic text-[16px] text-text">{current.q}</div>
+          <div className="space-y-2">
+            {current.branches.map((b, i) => (
+              <button
+                key={i}
+                type="button"
+                onClick={() => pick(b)}
+                className="block w-full text-left bg-surface border border-border rounded-md p-3 hover:border-border-strong hover:bg-surface-2 transition-colors text-[13px] text-text"
+              >
+                {b.label}
+              </button>
+            ))}
+          </div>
+        </>
+      ) : (
+        <div className="bg-surface border border-accent rounded-md p-4 space-y-2">
+          <div className="eyebrow text-accent">Run this</div>
+          <pre className="font-mono text-[13px] text-text bg-bg border border-border rounded-sm p-3 whitespace-pre-wrap">{terminal.cmd}</pre>
+          <div className="text-[12px] text-text-muted leading-relaxed">{terminal.why}</div>
+        </div>
+      )}
+
+      <div className="flex items-center justify-between pt-3 border-t border-border">
+        <button
+          type="button"
+          onClick={goBack}
+          disabled={path.length === 1 && !terminal}
+          className="text-[12px] text-text-muted hover:text-text disabled:opacity-40"
+        >
+          ← Back
+        </button>
+        <button
+          type="button"
+          onClick={reset}
+          disabled={path.length === 1 && !terminal && pickedLabels.length === 0}
+          className="text-[12px] text-text-muted hover:text-text disabled:opacity-40"
+        >
+          Start over
+        </button>
+      </div>
     </div>
   );
 }

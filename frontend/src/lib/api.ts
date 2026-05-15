@@ -1,13 +1,19 @@
 /* Typed API client. Vite proxies /api and /healthz to FastAPI on :8000. */
 
 import type {
+  AnovaRmResponse,
+  AnovaTwoResponse,
   ColumnsResponse,
   HistogramResponse,
+  LeveneResponse,
   LogitResponse,
   MarginsResponse,
+  OnewayResponse,
   PredictResponse,
   RegressResponse,
+  ShapiroResponse,
   SummarizeResult,
+  TabstatResponse,
   TabulateResult,
   TestResponse,
   UploadOrChoice,
@@ -98,6 +104,90 @@ export const api = {
     return (await resp.json()) as TabulateResult;
   },
 
+  tabstat: async (params: {
+    variables: string[];
+    by?: string | null;
+    stats?: string[] | null;
+    missing?: boolean;
+    frame?: string;
+  }): Promise<TabstatResponse> => {
+    const resp = await baseFetch("/api/stats/tabstat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ frame: "default", ...params }),
+    });
+    return (await resp.json()) as TabstatResponse;
+  },
+
+  oneway: async (params: {
+    depvar: string;
+    groupvar: string;
+    posthoc?: "none" | "bonferroni" | "scheffe" | "sidak";
+    if_expr?: string | null;
+    frame?: string;
+  }): Promise<OnewayResponse> => {
+    const resp = await baseFetch("/api/stats/oneway", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ frame: "default", posthoc: "none", ...params }),
+    });
+    return (await resp.json()) as OnewayResponse;
+  },
+
+  anovaTwo: async (params: {
+    depvar: string;
+    factor_a: string;
+    factor_b: string;
+    interaction?: boolean;
+    frame?: string;
+  }): Promise<AnovaTwoResponse> => {
+    const resp = await baseFetch("/api/stats/anova_two", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ frame: "default", interaction: true, ...params }),
+    });
+    return (await resp.json()) as AnovaTwoResponse;
+  },
+
+  anovaRm: async (params: {
+    depvar: string;
+    subject: string;
+    within: string;
+    between?: string | null;
+    correction?: "none" | "gg" | "hf";
+    frame?: string;
+  }): Promise<AnovaRmResponse> => {
+    const resp = await baseFetch("/api/stats/anova_rm", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ frame: "default", correction: "none", ...params }),
+    });
+    return (await resp.json()) as AnovaRmResponse;
+  },
+
+  shapiro: async (params: { var: string; by?: string | null; frame?: string }): Promise<ShapiroResponse> => {
+    const resp = await baseFetch("/api/stats/shapiro", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ frame: "default", ...params }),
+    });
+    return (await resp.json()) as ShapiroResponse;
+  },
+
+  levene: async (params: {
+    depvar: string;
+    groupvar: string;
+    center?: "median" | "mean" | "trimmed";
+    frame?: string;
+  }): Promise<LeveneResponse> => {
+    const resp = await baseFetch("/api/stats/levene", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ frame: "default", center: "median", ...params }),
+    });
+    return (await resp.json()) as LeveneResponse;
+  },
+
   regress: async (params: {
     depvar: string;
     indepvars: string[];
@@ -164,6 +254,7 @@ export const api = {
   },
 
   // ===== Graphs =====
+  // body accepts `subgroup` for grouped bar charts (B1 in v3.0.2).
   graph: async (
     kind: "histogram" | "scatter" | "box" | "bar" | "line" | "residuals" | "marginsplot",
     body: Record<string, unknown> = {},

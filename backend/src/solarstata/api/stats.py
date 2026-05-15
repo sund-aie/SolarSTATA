@@ -6,14 +6,20 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from ..engine import (
+    anova_rm,
+    anova_two,
     estat_ic,
     estat_vif,
+    levene,
     lincom,
     logit as logit_engine,
     margins,
+    oneway,
     predict,
     regress as regress_engine,
+    shapiro,
     summarize,
+    tabstat,
     tabulate,
     wald_test,
 )
@@ -38,6 +44,57 @@ class TabulateRequest(BaseModel):
     frame: str = "default"
     var1: str = Field(..., min_length=1)
     var2: str | None = None
+
+
+class TabstatRequest(BaseModel):
+    frame: str = "default"
+    variables: list[str] = Field(..., min_length=1)
+    by: str | None = None
+    stats: list[str] | None = None
+    missing: bool = False
+
+
+class OnewayRequest(BaseModel):
+    frame: str = "default"
+    depvar: str = Field(..., min_length=1)
+    groupvar: str = Field(..., min_length=1)
+    posthoc: str = "none"            # "none" | "bonferroni" | "scheffe" | "sidak"
+    if_expr: str | None = None
+    in_range: str | None = None
+
+
+class AnovaTwoRequest(BaseModel):
+    frame: str = "default"
+    depvar: str = Field(..., min_length=1)
+    factor_a: str = Field(..., min_length=1)
+    factor_b: str = Field(..., min_length=1)
+    interaction: bool = True
+    if_expr: str | None = None
+    in_range: str | None = None
+
+
+class AnovaRmRequest(BaseModel):
+    frame: str = "default"
+    depvar: str = Field(..., min_length=1)
+    subject: str = Field(..., min_length=1)
+    within: str = Field(..., min_length=1)
+    between: str | None = None
+    correction: str = "none"         # "none" | "gg" | "hf"
+    if_expr: str | None = None
+    in_range: str | None = None
+
+
+class ShapiroRequest(BaseModel):
+    frame: str = "default"
+    var: str = Field(..., min_length=1)
+    by: str | None = None
+
+
+class LeveneRequest(BaseModel):
+    frame: str = "default"
+    depvar: str = Field(..., min_length=1)
+    groupvar: str = Field(..., min_length=1)
+    center: str = "median"           # "median" | "mean" | "trimmed"
 
 
 class RegressRequest(BaseModel):
@@ -104,6 +161,80 @@ def stats_tabulate(req: TabulateRequest, session: Session = Depends(get_session)
     except KeyError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     session.r_results = dict(result.r_update)
+    session.append_history(result.command)
+    return safe(result.to_response())
+
+
+@router.post("/tabstat")
+def stats_tabstat(req: TabstatRequest, session: Session = Depends(get_session)) -> dict:
+    frame = _require_frame(session, req.frame)
+    try:
+        result = tabstat(frame.df, req.variables, by=req.by, stats=req.stats,
+                         missing=req.missing)
+    except (KeyError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    session.append_history(result.command)
+    return safe(result.to_response())
+
+
+@router.post("/oneway")
+def stats_oneway(req: OnewayRequest, session: Session = Depends(get_session)) -> dict:
+    frame = _require_frame(session, req.frame)
+    try:
+        result = oneway(frame.df, req.depvar, req.groupvar,
+                        posthoc=req.posthoc,                # type: ignore[arg-type]
+                        if_expr=req.if_expr, in_range=req.in_range)
+    except (KeyError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    session.append_history(result.command)
+    return safe(result.to_response())
+
+
+@router.post("/anova_two")
+def stats_anova_two(req: AnovaTwoRequest, session: Session = Depends(get_session)) -> dict:
+    frame = _require_frame(session, req.frame)
+    try:
+        result = anova_two(frame.df, req.depvar, req.factor_a, req.factor_b,
+                           interaction=req.interaction,
+                           if_expr=req.if_expr, in_range=req.in_range)
+    except (KeyError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    session.append_history(result.command)
+    return safe(result.to_response())
+
+
+@router.post("/anova_rm")
+def stats_anova_rm(req: AnovaRmRequest, session: Session = Depends(get_session)) -> dict:
+    frame = _require_frame(session, req.frame)
+    try:
+        result = anova_rm(frame.df, req.depvar, req.subject, req.within,
+                          between=req.between,
+                          correction=req.correction,        # type: ignore[arg-type]
+                          if_expr=req.if_expr, in_range=req.in_range)
+    except (KeyError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    session.append_history(result.command)
+    return safe(result.to_response())
+
+
+@router.post("/shapiro")
+def stats_shapiro(req: ShapiroRequest, session: Session = Depends(get_session)) -> dict:
+    frame = _require_frame(session, req.frame)
+    try:
+        result = shapiro(frame.df, req.var, by=req.by)
+    except (KeyError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    session.append_history(result.command)
+    return safe(result.to_response())
+
+
+@router.post("/levene")
+def stats_levene(req: LeveneRequest, session: Session = Depends(get_session)) -> dict:
+    frame = _require_frame(session, req.frame)
+    try:
+        result = levene(frame.df, req.depvar, req.groupvar, center=req.center)  # type: ignore[arg-type]
+    except (KeyError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
     session.append_history(result.command)
     return safe(result.to_response())
 

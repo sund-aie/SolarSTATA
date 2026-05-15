@@ -227,11 +227,23 @@ def bar_with_ci(
     var: str,
     *,
     group: str | None = None,
+    subgroup: str | None = None,
     ci: float = 0.95,
     value_labels: dict[str, dict] | None = None,
 ) -> dict:
+    """Bar chart of mean(`var`) per group, with optional sub-grouping.
+
+    When `subgroup` is set the chart produces one trace per subgroup
+    level, with `barmode='group'` so bars cluster by `group`. Both axes
+    preserve data-encounter order via Plotly's `categoryorder: array`.
+    This is the canonical "8 milks × 3 timepoints" figure.
+    """
     if var not in df.columns:
         raise KeyError(f"variable {var!r} not in dataset")
+    if subgroup and subgroup not in df.columns:
+        raise KeyError(f"subgroup variable {subgroup!r} not in dataset")
+    if subgroup and group and group in df.columns:
+        return _bar_grouped(df, var, group, subgroup, ci, value_labels)
     if not group or group not in df.columns:
         s = pd.to_numeric(df[var], errors="coerce").dropna()
         m, se = float(s.mean()), float(sp.sem(s)) if len(s) > 1 else 0.0
@@ -279,6 +291,59 @@ def bar_with_ci(
         }],
         "layout": layout,
     }
+
+
+def _bar_grouped(df, var, group, subgroup, ci, value_labels):
+    """Grouped bar: one trace per subgroup-level. X axis is grouped categories."""
+    sub_labels = (value_labels or {}).get(subgroup)
+    group_labels = (value_labels or {}).get(group)
+
+    sub_levels: list = []
+    for lvl in df[subgroup].dropna().unique():
+        if lvl not in sub_levels:
+            sub_levels.append(lvl)
+    group_levels: list = []
+    for lvl in df[group].dropna().unique():
+        if lvl not in group_levels:
+            group_levels.append(lvl)
+
+    traces = []
+    for i, sub_lvl in enumerate(sub_levels):
+        sub_df = df[df[subgroup] == sub_lvl]
+        xs: list[str] = []
+        ys: list[float] = []
+        errs: list[float] = []
+        for grp_lvl in group_levels:
+            cell = pd.to_numeric(
+                sub_df.loc[sub_df[group] == grp_lvl, var],
+                errors="coerce",
+            ).dropna()
+            if cell.empty:
+                xs.append(_label_for(grp_lvl, group_labels))
+                ys.append(float("nan"))
+                errs.append(0.0)
+                continue
+            m = float(cell.mean())
+            se = float(sp.sem(cell)) if len(cell) > 1 else 0.0
+            half = sp.t.ppf((1 + ci) / 2, df=max(1, len(cell) - 1)) * se if len(cell) > 1 else 0.0
+            xs.append(_label_for(grp_lvl, group_labels))
+            ys.append(m)
+            errs.append(half)
+        traces.append({
+            "type": "bar",
+            "name": _label_for(sub_lvl, sub_labels),
+            "x": xs,
+            "y": ys,
+            "error_y": {"type": "data", "array": errs, "visible": True,
+                        "color": "rgba(0,0,0,0.45)", "thickness": 1.2, "width": 6},
+            "marker": {"color": _color_for(i)},
+        })
+
+    layout = _layout(f"Mean {var} by {group} × {subgroup} (95% CI)", group, f"mean {var}")
+    layout["barmode"] = "group"
+    layout["xaxis"] = {**layout["xaxis"], "type": "category", "categoryorder": "array",
+                       "categoryarray": [_label_for(g, group_labels) for g in group_levels]}
+    return {"data": traces, "layout": layout}
 
 
 # ===================================================================
