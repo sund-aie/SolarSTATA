@@ -197,6 +197,17 @@ export const api = {
     return await resp.blob();
   },
 
+  exportCapabilities: async (): Promise<{
+    pdf: boolean;
+    html: boolean;
+    do_file: boolean;
+    dataset_formats: string[];
+    pdf_unavailable_reason: string | null;
+  }> => {
+    const resp = await baseFetch("/api/export/capabilities");
+    return await resp.json();
+  },
+
   downloadWorkspace: async (): Promise<Blob> => {
     const resp = await baseFetch("/api/workspace/download");
     return await resp.blob();

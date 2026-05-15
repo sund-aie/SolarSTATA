@@ -30,7 +30,7 @@ export function GuidedMode() {
       style={{ gridTemplateColumns: dataset ? "240px 1fr 380px" : "240px 1fr" }}
     >
       <WizardRail />
-      <main className="overflow-hidden">
+      <main className="overflow-y-auto min-h-0">
         {!dataset && step === "import" && <ImportStep />}
         {dataset && step === "import" && <ImportStep />}
         {dataset && step === "inspect" && <InspectStep />}

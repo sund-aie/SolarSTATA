@@ -362,7 +362,8 @@ def dispatch(parsed: ParsedCommand, session: Session, frame: Frame) -> DispatchO
             if not isinstance(parsed.options.get("bin"), bool) else 20
         group = parsed.options.get("by")
         group = group if isinstance(group, str) else None
-        fig = histogram_fn(frame.df, parsed.args[0], bins=bins, group=group)
+        fig = histogram_fn(frame.df, parsed.args[0], bins=bins, group=group,
+                           value_labels=frame.value_labels)
         return DispatchOutcome(
             blocks=[_graph_result(fig, parsed.raw)],
             graphs=[fig],
@@ -374,7 +375,8 @@ def dispatch(parsed: ParsedCommand, session: Session, frame: Frame) -> DispatchO
         y_var, x_var = parsed.args[0], parsed.args[1]
         group = parsed.options.get("by")
         group = group if isinstance(group, str) else None
-        fig = scatter_fn(frame.df, x_var, y_var, group=group)
+        fig = scatter_fn(frame.df, x_var, y_var, group=group,
+                         value_labels=frame.value_labels)
         return DispatchOutcome(
             blocks=[_graph_result(fig, parsed.raw)],
             graphs=[fig],
@@ -385,7 +387,8 @@ def dispatch(parsed: ParsedCommand, session: Session, frame: Frame) -> DispatchO
             raise ValueError("box requires a variable")
         group = parsed.options.get("over") or parsed.options.get("by")
         group = group if isinstance(group, str) else None
-        fig = box_fn(frame.df, parsed.args[0], group=group)
+        fig = box_fn(frame.df, parsed.args[0], group=group,
+                     value_labels=frame.value_labels)
         return DispatchOutcome(
             blocks=[_graph_result(fig, parsed.raw)],
             graphs=[fig],
@@ -396,7 +399,8 @@ def dispatch(parsed: ParsedCommand, session: Session, frame: Frame) -> DispatchO
             raise ValueError("bar requires a variable")
         group = parsed.options.get("over") or parsed.options.get("by")
         group = group if isinstance(group, str) else None
-        fig = bar_fn(frame.df, parsed.args[0], group=group)
+        fig = bar_fn(frame.df, parsed.args[0], group=group,
+                     value_labels=frame.value_labels)
         return DispatchOutcome(
             blocks=[_graph_result(fig, parsed.raw)],
             graphs=[fig],
@@ -408,7 +412,8 @@ def dispatch(parsed: ParsedCommand, session: Session, frame: Frame) -> DispatchO
         y_var, x_var = parsed.args[0], parsed.args[1]
         group = parsed.options.get("by")
         group = group if isinstance(group, str) else None
-        fig = line_fn(frame.df, x_var, y_var, group=group)
+        fig = line_fn(frame.df, x_var, y_var, group=group,
+                      value_labels=frame.value_labels)
         return DispatchOutcome(
             blocks=[_graph_result(fig, parsed.raw)],
             graphs=[fig],

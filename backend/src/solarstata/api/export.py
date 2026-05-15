@@ -1,10 +1,18 @@
 """Export routes: dataset (csv / xlsx / dta / parquet), do-file, and a
 research-report PDF/HTML rendered from the session's command history.
+
+PDF export depends on WeasyPrint + GTK shared libs. On Windows those
+libs aren't bundled with Python so an `import weasyprint` succeeds but
+the first call to `HTML(...).write_pdf()` raises an OSError loading
+libgobject-2.0-0. We detect the failure mode at import-time and expose
+`/api/export/capabilities` so the frontend can disable the PDF button
+proactively instead of letting users hit a 500.
 """
 
 from __future__ import annotations
 
 import io
+import logging
 import tempfile
 from datetime import datetime
 from pathlib import Path
@@ -17,7 +25,42 @@ from jinja2 import Template
 from ..session.models import Session
 from .deps import get_session
 
+log = logging.getLogger(__name__)
 router = APIRouter(prefix="/export", tags=["export"])
+
+
+# ===================================================================
+# Capabilities — probe optional binary deps once at import time.
+# ===================================================================
+
+def _probe_weasyprint() -> tuple[bool, str | None]:
+    """Try to render the smallest possible PDF. Returns (available, reason)."""
+    try:
+        from weasyprint import HTML  # noqa: PLC0415
+    except Exception as exc:  # noqa: BLE001
+        return False, f"weasyprint module not importable: {exc}"
+    try:
+        HTML(string="<p>probe</p>").write_pdf()
+        return True, None
+    except Exception as exc:  # noqa: BLE001 — GTK libs typically fail here on Windows
+        log.warning("WeasyPrint PDF rendering unavailable: %s", exc)
+        return False, str(exc)
+
+
+_PDF_AVAILABLE, _PDF_REASON = _probe_weasyprint()
+
+
+@router.get("/capabilities")
+def export_capabilities() -> dict:
+    """What exports are available on this server. Lets the frontend
+    disable the PDF button up front instead of fishing for a 503."""
+    return {
+        "pdf": _PDF_AVAILABLE,
+        "html": True,
+        "do_file": True,
+        "dataset_formats": ["csv", "xlsx", "dta", "parquet"],
+        "pdf_unavailable_reason": None if _PDF_AVAILABLE else _PDF_REASON,
+    }
 
 
 # ===================================================================
@@ -229,12 +272,26 @@ def export_report(
     if format == "html":
         return _stream(html.encode("utf-8"), "solarstata_report.html", "text/html")
 
-    try:
-        from weasyprint import HTML
-    except Exception as exc:  # noqa: BLE001
-        raise HTTPException(status_code=500, detail=f"PDF export unavailable: {exc}")
+    # PDF path — bail fast with a 503 when WeasyPrint can't render.
+    # Most common cause on Windows: libgobject-2.0-0 not found.
+    if not _PDF_AVAILABLE:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "PDF export isn't available on this server "
+                f"({_PDF_REASON or 'WeasyPrint init failed'}). "
+                "Use the HTML report instead — most browsers can print it to PDF."
+            ),
+        )
 
-    pdf_bytes = HTML(string=html).write_pdf()
+    from weasyprint import HTML  # noqa: PLC0415 — already probed above
+    try:
+        pdf_bytes = HTML(string=html).write_pdf()
+    except Exception as exc:  # noqa: BLE001 — defensive; capability probe may have lied
+        raise HTTPException(
+            status_code=503,
+            detail=f"PDF rendering failed unexpectedly: {exc}. Use the HTML report instead.",
+        )
     return _stream(pdf_bytes, "solarstata_report.pdf", "application/pdf")
 
 

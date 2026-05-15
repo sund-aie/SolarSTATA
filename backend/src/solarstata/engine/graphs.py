@@ -36,6 +36,40 @@ WARN = "#D89B7E"
 PALETTE = [ACCENT, INFO, GOOD, WARN, "#B4A0D2", "#8FAA88", "#D89B7E"]
 
 
+def _label_for(value, labels_for_var: dict | None) -> str:
+    """Look up a Stata-style value label, falling back to str(value).
+
+    `labels_for_var` is the {code: label} dict produced by pyreadstat for
+    a single variable (e.g. {1: "Baseline", 2: "5-day"}). Keys can arrive
+    as ints, floats, or strings depending on the original .dta, so we
+    probe a few coercions before giving up.
+    """
+    if not labels_for_var:
+        return str(value)
+    for key in (value, str(value)):
+        if key in labels_for_var:
+            return str(labels_for_var[key])
+    # Numeric-typed key dict, string value — try the round-trip.
+    try:
+        as_int = int(value)
+        if as_int in labels_for_var:
+            return str(labels_for_var[as_int])
+    except (TypeError, ValueError):
+        pass
+    return str(value)
+
+
+def _groupby_preserve_order(df: pd.DataFrame, group: str):
+    """Yield (level, sub) pairs in first-encounter order.
+
+    Default pandas groupby sorts groups alphabetically, which breaks
+    intuitive ordering (Baseline < 5-day < 10-day comes out 10-day,
+    5-day, Baseline). Callers who pre-sorted their data should see
+    their order respected.
+    """
+    return df.groupby(group, dropna=True, sort=False)
+
+
 def _layout(title: str, x_title: str = "", y_title: str = "") -> dict[str, Any]:
     """Minimal-styled layout. Frontend Plot wrapper overlays theme colors."""
     return {
@@ -58,20 +92,28 @@ def _color_for(i: int) -> str:
 # histogram
 # ===================================================================
 
-def histogram(df: pd.DataFrame, var: str, *, bins: int = 20, group: str | None = None) -> dict:
+def histogram(
+    df: pd.DataFrame,
+    var: str,
+    *,
+    bins: int = 20,
+    group: str | None = None,
+    value_labels: dict[str, dict] | None = None,
+) -> dict:
     if var not in df.columns:
         raise KeyError(f"variable {var!r} not in dataset")
     series = pd.to_numeric(df[var], errors="coerce").dropna()
 
     if group and group in df.columns:
+        labels = (value_labels or {}).get(group)
         data = []
-        for i, (lvl, sub) in enumerate(df.groupby(group, dropna=True)):
+        for i, (lvl, sub) in enumerate(_groupby_preserve_order(df, group)):
             s = pd.to_numeric(sub[var], errors="coerce").dropna()
             data.append({
                 "type": "histogram",
                 "x": s.tolist(),
                 "nbinsx": bins,
-                "name": str(lvl),
+                "name": _label_for(lvl, labels),
                 "marker": {"color": _color_for(i)},
                 "opacity": 0.65,
             })
@@ -94,20 +136,29 @@ def histogram(df: pd.DataFrame, var: str, *, bins: int = 20, group: str | None =
 # scatter
 # ===================================================================
 
-def scatter(df: pd.DataFrame, x: str, y: str, *, group: str | None = None) -> dict:
+def scatter(
+    df: pd.DataFrame,
+    x: str,
+    y: str,
+    *,
+    group: str | None = None,
+    value_labels: dict[str, dict] | None = None,
+) -> dict:
     for v in (x, y):
         if v not in df.columns:
             raise KeyError(f"variable {v!r} not in dataset")
 
     if group and group in df.columns:
+        labels = (value_labels or {}).get(group)
+        sub_df = df.dropna(subset=[x, y])
         traces = []
-        for i, (lvl, sub) in enumerate(df.dropna(subset=[x, y]).groupby(group, dropna=True)):
+        for i, (lvl, sub) in enumerate(_groupby_preserve_order(sub_df, group)):
             traces.append({
                 "type": "scatter",
                 "mode": "markers",
                 "x": pd.to_numeric(sub[x], errors="coerce").tolist(),
                 "y": pd.to_numeric(sub[y], errors="coerce").tolist(),
-                "name": str(lvl),
+                "name": _label_for(lvl, labels),
                 "marker": {"color": _color_for(i), "size": 6, "opacity": 0.75,
                            "line": {"width": 0}},
             })
@@ -130,18 +181,25 @@ def scatter(df: pd.DataFrame, x: str, y: str, *, group: str | None = None) -> di
 # box
 # ===================================================================
 
-def box(df: pd.DataFrame, var: str, *, group: str | None = None) -> dict:
+def box(
+    df: pd.DataFrame,
+    var: str,
+    *,
+    group: str | None = None,
+    value_labels: dict[str, dict] | None = None,
+) -> dict:
     if var not in df.columns:
         raise KeyError(f"variable {var!r} not in dataset")
 
     if group and group in df.columns:
+        labels = (value_labels or {}).get(group)
         traces = []
-        for i, (lvl, sub) in enumerate(df.groupby(group, dropna=True)):
+        for i, (lvl, sub) in enumerate(_groupby_preserve_order(df, group)):
             s = pd.to_numeric(sub[var], errors="coerce").dropna()
             traces.append({
                 "type": "box",
                 "y": s.tolist(),
-                "name": str(lvl),
+                "name": _label_for(lvl, labels),
                 "marker": {"color": _color_for(i)},
                 "boxmean": True,
             })
@@ -164,7 +222,14 @@ def box(df: pd.DataFrame, var: str, *, group: str | None = None) -> dict:
 # bar with CI
 # ===================================================================
 
-def bar_with_ci(df: pd.DataFrame, var: str, *, group: str | None = None, ci: float = 0.95) -> dict:
+def bar_with_ci(
+    df: pd.DataFrame,
+    var: str,
+    *,
+    group: str | None = None,
+    ci: float = 0.95,
+    value_labels: dict[str, dict] | None = None,
+) -> dict:
     if var not in df.columns:
         raise KeyError(f"variable {var!r} not in dataset")
     if not group or group not in df.columns:
@@ -183,20 +248,26 @@ def bar_with_ci(df: pd.DataFrame, var: str, *, group: str | None = None, ci: flo
             "layout": _layout(f"Mean of {var} (95% CI)", "", f"mean {var}"),
         }
 
+    labels = (value_labels or {}).get(group)
     xs: list[str] = []
     ys: list[float] = []
     errs: list[float] = []
-    for lvl, sub in df.groupby(group, dropna=True):
+    for lvl, sub in _groupby_preserve_order(df, group):
         s = pd.to_numeric(sub[var], errors="coerce").dropna()
         if len(s) < 1:
             continue
         m = float(s.mean())
         se = float(sp.sem(s)) if len(s) > 1 else 0.0
         half = sp.t.ppf((1 + ci) / 2, df=max(1, len(s) - 1)) * se if len(s) > 1 else 0.0
-        xs.append(str(lvl))
+        xs.append(_label_for(lvl, labels))
         ys.append(m)
         errs.append(half)
 
+    layout = _layout(f"Mean {var} by {group} (95% CI)", group, f"mean {var}")
+    # Lock the axis to our explicit ordering — without this Plotly
+    # re-sorts categorical axes alphabetically by default.
+    layout["xaxis"] = {**layout["xaxis"], "type": "category", "categoryorder": "array",
+                       "categoryarray": xs}
     return {
         "data": [{
             "type": "bar",
@@ -206,7 +277,7 @@ def bar_with_ci(df: pd.DataFrame, var: str, *, group: str | None = None, ci: flo
                         "color": INFO, "thickness": 1.5, "width": 8},
             "marker": {"color": ACCENT},
         }],
-        "layout": _layout(f"Mean {var} by {group} (95% CI)", group, f"mean {var}"),
+        "layout": layout,
     }
 
 
@@ -214,7 +285,14 @@ def bar_with_ci(df: pd.DataFrame, var: str, *, group: str | None = None, ci: flo
 # line
 # ===================================================================
 
-def line(df: pd.DataFrame, x: str, y: str, *, group: str | None = None) -> dict:
+def line(
+    df: pd.DataFrame,
+    x: str,
+    y: str,
+    *,
+    group: str | None = None,
+    value_labels: dict[str, dict] | None = None,
+) -> dict:
     for v in (x, y):
         if v not in df.columns:
             raise KeyError(f"variable {v!r} not in dataset")
@@ -232,9 +310,11 @@ def line(df: pd.DataFrame, x: str, y: str, *, group: str | None = None) -> dict:
         }
 
     if group and group in df.columns:
+        labels = (value_labels or {}).get(group)
+        sub_df = df.dropna(subset=[x, y])
         traces = []
-        for i, (lvl, sub) in enumerate(df.dropna(subset=[x, y]).groupby(group, dropna=True)):
-            traces.append(_trace(sub, _color_for(i), str(lvl)))
+        for i, (lvl, sub) in enumerate(_groupby_preserve_order(sub_df, group)):
+            traces.append(_trace(sub, _color_for(i), _label_for(lvl, labels)))
         return {"data": traces, "layout": _layout(f"{y} over {x} by {group}", x, y)}
 
     return {

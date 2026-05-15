@@ -168,6 +168,13 @@ export function VisualizeStep() {
 // Per-chart forms
 // =====================================================================
 
+/** True for any column whose underlying pandas dtype is numeric. We can't
+ * gate scatter/line axes on `kind === "numeric"` alone — integer-coded
+ * categoricals like timepoint (1/2/3) and group_id are perfectly usable
+ * on an axis. */
+const dtypeIsNumeric = (dtype: string): boolean =>
+  /^(int|uint|float|bool)/i.test(dtype);
+
 function ChartForm({
   chart,
   columns,
@@ -177,7 +184,13 @@ function ChartForm({
   columns: ColumnInfo[];
   onRendered: (r: Rendered) => void;
 }) {
+  // Histogram / box / bar still want continuous-shaped variables.
   const numerics = useMemo(() => columns.filter((c) => c.kind === "numeric"), [columns]);
+  // Scatter / line accept anything numerically-encoded.
+  const axisEligible = useMemo(
+    () => columns.filter((c) => dtypeIsNumeric(c.dtype)),
+    [columns],
+  );
   const categoricals = useMemo(
     () => columns.filter((c) => c.kind === "binary" || c.kind === "categorical"),
     [columns],
@@ -186,10 +199,10 @@ function ChartForm({
   return (
     <div className="bg-surface border border-border rounded-md p-6">
       {chart.id === "histogram" && <HistogramForm numerics={numerics} categoricals={categoricals} onRendered={onRendered} />}
-      {chart.id === "scatter" && <XYForm chart="scatter" numerics={numerics} categoricals={categoricals} onRendered={onRendered} />}
+      {chart.id === "scatter" && <XYForm chart="scatter" numerics={axisEligible} categoricals={categoricals} onRendered={onRendered} />}
       {chart.id === "box" && <SingleYForm chart="box" numerics={numerics} categoricals={categoricals} onRendered={onRendered} />}
       {chart.id === "bar" && <SingleYForm chart="bar" numerics={numerics} categoricals={categoricals} onRendered={onRendered} />}
-      {chart.id === "line" && <XYForm chart="line" numerics={numerics} categoricals={categoricals} onRendered={onRendered} />}
+      {chart.id === "line" && <XYForm chart="line" numerics={axisEligible} categoricals={categoricals} onRendered={onRendered} />}
       {chart.id === "residuals" && <NoInputForm chart="residuals" onRendered={onRendered} />}
       {chart.id === "marginsplot" && <NoInputForm chart="marginsplot" onRendered={onRendered} />}
     </div>

@@ -66,7 +66,8 @@ class LineRequest(BaseModel):
 def stats_histogram(req: HistogramRequest, session: Session = Depends(get_session)) -> dict:
     frame = _require_frame(session, req.frame)
     try:
-        fig = histogram(frame.df, req.var, bins=req.bins, group=req.group)
+        fig = histogram(frame.df, req.var, bins=req.bins, group=req.group,
+                        value_labels=frame.value_labels)
     except KeyError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     return _packed(fig, command=_cmd("histogram", req.var, group=req.group, bins=req.bins))
@@ -76,7 +77,8 @@ def stats_histogram(req: HistogramRequest, session: Session = Depends(get_sessio
 def stats_scatter(req: ScatterRequest, session: Session = Depends(get_session)) -> dict:
     frame = _require_frame(session, req.frame)
     try:
-        fig = scatter(frame.df, req.x, req.y, group=req.group)
+        fig = scatter(frame.df, req.x, req.y, group=req.group,
+                      value_labels=frame.value_labels)
     except KeyError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     return _packed(fig, command=_cmd("scatter", f"{req.y} {req.x}", group=req.group))
@@ -86,7 +88,8 @@ def stats_scatter(req: ScatterRequest, session: Session = Depends(get_session)) 
 def stats_box(req: BoxRequest, session: Session = Depends(get_session)) -> dict:
     frame = _require_frame(session, req.frame)
     try:
-        fig = box(frame.df, req.var, group=req.group)
+        fig = box(frame.df, req.var, group=req.group,
+                  value_labels=frame.value_labels)
     except KeyError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     return _packed(fig, command=_cmd("graph box", req.var, group=req.group, over=True))
@@ -96,7 +99,8 @@ def stats_box(req: BoxRequest, session: Session = Depends(get_session)) -> dict:
 def stats_bar(req: BarRequest, session: Session = Depends(get_session)) -> dict:
     frame = _require_frame(session, req.frame)
     try:
-        fig = bar_with_ci(frame.df, req.var, group=req.group, ci=req.ci)
+        fig = bar_with_ci(frame.df, req.var, group=req.group, ci=req.ci,
+                          value_labels=frame.value_labels)
     except KeyError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     return _packed(fig, command=_cmd("graph bar", f"(mean) {req.var}", group=req.group, over=True))
@@ -106,7 +110,8 @@ def stats_bar(req: BarRequest, session: Session = Depends(get_session)) -> dict:
 def stats_line(req: LineRequest, session: Session = Depends(get_session)) -> dict:
     frame = _require_frame(session, req.frame)
     try:
-        fig = line(frame.df, req.x, req.y, group=req.group)
+        fig = line(frame.df, req.x, req.y, group=req.group,
+                   value_labels=frame.value_labels)
     except KeyError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     return _packed(fig, command=_cmd("twoway line", f"{req.y} {req.x}", group=req.group))

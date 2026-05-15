@@ -6,7 +6,7 @@
  *   - Research report (PDF or HTML rendered from history)
  */
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { api, ApiError } from "../lib/api";
 import { useApp } from "../state/store";
 import { Tooltip } from "../components/Tooltip";
@@ -14,9 +14,26 @@ import { Tooltip } from "../components/Tooltip";
 type DataFmt = "csv" | "xlsx" | "dta" | "parquet";
 type ReportFmt = "pdf" | "html";
 
+interface Capabilities {
+  pdf: boolean;
+  pdf_unavailable_reason: string | null;
+}
+
 export function ExportStep() {
   const dataset = useApp((s) => s.dataset);
   const history = useApp((s) => s.commandHistory);
+  const [capabilities, setCapabilities] = useState<Capabilities>({
+    pdf: true, pdf_unavailable_reason: null,
+  });
+
+  useEffect(() => {
+    api.exportCapabilities()
+      .then((c) => setCapabilities({ pdf: c.pdf, pdf_unavailable_reason: c.pdf_unavailable_reason }))
+      .catch(() => {
+        // Fall back to optimistic UI — server will return 503 if PDF really
+        // isn't available and the report card surfaces that error.
+      });
+  }, []);
 
   if (!dataset) return null;
 
@@ -36,7 +53,7 @@ export function ExportStep() {
       <div className="grid gap-5 max-w-[820px]" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))" }}>
         <DatasetCard filename={dataset.filename} />
         <DoFileCard nCommands={history.length} />
-        <ReportCard nCommands={history.length} />
+        <ReportCard nCommands={history.length} capabilities={capabilities} />
       </div>
     </div>
   );
@@ -150,7 +167,10 @@ function DoFileCard({ nCommands }: { nCommands: number }) {
 // Report card
 // =====================================================================
 
-function ReportCard({ nCommands }: { nCommands: number }) {
+function ReportCard({
+  nCommands,
+  capabilities,
+}: { nCommands: number; capabilities: Capabilities }) {
   const [busy, setBusy] = useState<ReportFmt | "">("");
   const [error, setError] = useState<string | null>(null);
 
@@ -163,6 +183,21 @@ function ReportCard({ nCommands }: { nCommands: number }) {
     finally { setBusy(""); }
   };
 
+  const pdfDisabled = !capabilities.pdf;
+  const pdfWhat = capabilities.pdf
+    ? "PDF rendered via WeasyPrint. Instrument Serif headings, IBM Plex Sans body."
+    : "PDF export isn't available on this server. WeasyPrint needs the GTK shared "
+      + "libraries (libgobject, libpango, …) which don't ship with Python on Windows. "
+      + "Use HTML and print-to-PDF from your browser instead.";
+  const pdfHow = capabilities.pdf
+    ? "Click to download. A4 pages, page numbers, command + output blocks."
+    : "On macOS / Linux, PDF should work out of the box. On Windows, install "
+      + "GTK 3 runtime from https://github.com/tschoonj/GTK-for-Windows-Runtime-Environment-Installer "
+      + "and restart SolarSTATA.";
+  const pdfExample = capabilities.pdf
+    ? "Drop into a paper as a Methods appendix."
+    : <>HTML works everywhere &mdash; <code className="font-mono">Cmd/Ctrl+P</code> in your browser will save it as PDF.</>;
+
   return (
     <div className="bg-surface border border-border rounded-md p-5">
       <div className="font-serif italic text-[16px] text-text mb-2">Research report</div>
@@ -170,18 +205,15 @@ function ReportCard({ nCommands }: { nCommands: number }) {
         Clean PDF or HTML write-up of every command you ran, formatted for sharing.
       </div>
       <div className="grid grid-cols-2 gap-2">
-        <Tooltip
-          what="PDF rendered via WeasyPrint. Instrument Serif headings, IBM Plex Sans body."
-          how="Click to download. A4 pages, page numbers, command + output blocks."
-          example="Drop into a paper as a Methods appendix."
-        >
+        <Tooltip what={pdfWhat} how={pdfHow} example={pdfExample}>
           <button
             type="button"
             onClick={() => onDownload("pdf")}
-            disabled={busy !== "" || nCommands === 0}
+            disabled={pdfDisabled || busy !== "" || nCommands === 0}
             className="run-btn-primary disabled:opacity-60 !w-full"
+            aria-label={pdfDisabled ? "PDF export unavailable" : "Download PDF report"}
           >
-            {busy === "pdf" ? "Saving…" : "PDF"}
+            {busy === "pdf" ? "Saving…" : pdfDisabled ? "PDF unavailable" : "PDF"}
           </button>
         </Tooltip>
         <Tooltip
@@ -193,12 +225,18 @@ function ReportCard({ nCommands }: { nCommands: number }) {
             type="button"
             onClick={() => onDownload("html")}
             disabled={busy !== "" || nCommands === 0}
-            className="run-btn-secondary disabled:opacity-60 !w-full"
+            className={`disabled:opacity-60 !w-full ${pdfDisabled ? "run-btn-primary" : "run-btn-secondary"}`}
           >
             {busy === "html" ? "Saving…" : "HTML"}
           </button>
         </Tooltip>
       </div>
+      {pdfDisabled && (
+        <div className="mt-3 text-[11px] text-text-faint leading-snug">
+          PDF export isn't available on this server. HTML works everywhere; use{" "}
+          <span className="font-mono">Cmd/Ctrl+P</span> in your browser to save it as PDF.
+        </div>
+      )}
       {error && <div className="mt-3 text-[12px] text-warn">{error}</div>}
     </div>
   );

@@ -8,7 +8,7 @@
  * to the Inspect step or later phases.
  */
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { api, ApiError } from "../lib/api";
 import type {
   CoefRow,
@@ -229,6 +229,10 @@ function OlsForm({ columns }: { columns: ColumnInfo[] }) {
   const [cluster, setCluster] = useState<string>("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Synchronous in-flight lock — `busy` is React state that doesn't update
+  // until the next render, so rapid clicks can fire multiple requests before
+  // the button visibly disables. A ref blocks them immediately.
+  const inFlight = useRef(false);
 
   const pushAnalyze = useApp((s) => s.pushAnalyzeRecord);
   const setLast = useApp((s) => s.setLastEstimation);
@@ -236,7 +240,9 @@ function OlsForm({ columns }: { columns: ColumnInfo[] }) {
   const indepvars = predictors.map((p) => formatFactor(p, allCols));
 
   const onRun = async () => {
+    if (inFlight.current) return;
     if (!depvar || predictors.length === 0) return;
+    inFlight.current = true;
     setBusy(true);
     setError(null);
     try {
@@ -263,6 +269,7 @@ function OlsForm({ columns }: { columns: ColumnInfo[] }) {
     } catch (e) {
       setError(e instanceof ApiError ? e.detail : String(e));
     } finally {
+      inFlight.current = false;
       setBusy(false);
     }
   };
@@ -353,6 +360,7 @@ function LogitForm({ columns }: { columns: ColumnInfo[] }) {
   const [robust, setRobust] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const inFlight = useRef(false);
 
   const pushAnalyze = useApp((s) => s.pushAnalyzeRecord);
   const setLast = useApp((s) => s.setLastEstimation);
@@ -360,7 +368,9 @@ function LogitForm({ columns }: { columns: ColumnInfo[] }) {
   const indepvars = predictors.map((p) => formatFactor(p, allCols));
 
   const onRun = async () => {
+    if (inFlight.current) return;
     if (!depvar || predictors.length === 0) return;
+    inFlight.current = true;
     setBusy(true);
     setError(null);
     try {
@@ -387,6 +397,7 @@ function LogitForm({ columns }: { columns: ColumnInfo[] }) {
     } catch (e) {
       setError(e instanceof ApiError ? e.detail : String(e));
     } finally {
+      inFlight.current = false;
       setBusy(false);
     }
   };
@@ -468,7 +479,15 @@ function PredictorsEditor({
   onChange: (next: FactorState[]) => void;
 }) {
   const inUse = new Set(value.map((v) => v.name));
-  const addable = columns.filter((c) => !inUse.has(c.name) && c.kind !== "id" && c.kind !== "string");
+  // ID-typed columns are only hidden when they look like row identifiers
+  // (high uniqueness). A column named `group_id` with 8 unique values out
+  // of 400 rows is plainly a grouping factor and should stay selectable.
+  const addable = columns.filter((c) => {
+    if (inUse.has(c.name)) return false;
+    if (c.kind === "string") return false;
+    if (c.kind === "id" && c.n > 0 && c.n_unique > c.n / 3) return false;
+    return true;
+  });
 
   const add = (name: string) => onChange([...value, { name, mode: "auto" }]);
   const remove = (name: string) => onChange(value.filter((v) => v.name !== name));
