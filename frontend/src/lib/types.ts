@@ -255,8 +255,204 @@ export interface TestResponse {
 // estimation context so postestimation buttons remain meaningful.
 export interface AnalyzeRecord {
   command: string;
-  kind: "regress" | "logit" | "margins" | "predict" | "test" | "lincom" | "estat_ic" | "estat_vif";
+  kind: "regress" | "logit" | "margins" | "predict" | "test" | "lincom"
+       | "estat_ic" | "estat_vif"
+       | "oneway" | "anova_two" | "anova_rm"
+       | "shapiro" | "levene" | "tabstat";
   payload: unknown;
   text: string;
   timestamp: number;
+}
+
+// =====================================================================
+// v3.0.2 — ANOVA family
+// =====================================================================
+
+export interface OnewayGroupStat {
+  group: string;
+  n: number;
+  mean: number | null;
+  sd: number | null;
+}
+
+export interface OnewayPairwise {
+  a: string;
+  b: string;
+  mean_diff: number | null;
+  se: number | null;
+  t: number | null;
+  p_raw: number | null;
+  p_adj: number | null;
+}
+
+export interface OnewayResponse {
+  command: string;
+  result: {
+    kind: "oneway";
+    depvar: string;
+    groupvar: string;
+    n: number;
+    k: number;
+    F: number | null;
+    p: number | null;
+    group_stats: OnewayGroupStat[];
+    anova_table: {
+      Source: string[];
+      SS: (number | null)[];
+      df: number[];
+      MS: (number | null)[];
+      F: (number | null)[];
+      Prob_F: (number | null)[];
+    };
+    bartlett: {
+      chi2: number | null;
+      df: number;
+      p: number | null;
+      note?: string;
+    };
+    posthoc: "none" | "bonferroni" | "scheffe" | "sidak";
+    posthoc_block: {
+      method: string;
+      n_pairs: number;
+      comparisons: OnewayPairwise[];
+      matrix: Record<string, Record<string, { mean_diff: number | null; p_adj: number | null }>>;
+    } | null;
+  };
+  text: string;
+  r_set: Record<string, unknown>;
+  e_set: Record<string, unknown> | null;
+}
+
+export interface AnovaSourceRow {
+  Source: string;
+  SS: number | null;
+  df: number;
+  MS: number | null;
+  F: number | null;
+  Prob_F: number | null;
+}
+
+export interface AnovaTwoResponse {
+  command: string;
+  result: {
+    kind: "anova_two";
+    depvar: string;
+    factor_a: string;
+    factor_b: string;
+    interaction: boolean;
+    rows: AnovaSourceRow[];
+    r_squared: number | null;
+    r_squared_adj: number | null;
+    n: number;
+  };
+  text: string;
+  r_set: Record<string, unknown>;
+  e_set: Record<string, unknown> | null;
+}
+
+export interface AnovaRmRow {
+  Source: string;
+  F: number | null;
+  df_num: number | null;
+  df_den: number | null;
+  p: number | null;
+  epsilon: number | null;
+  p_adj: number | null;
+}
+
+export interface AnovaRmBetweenSummary {
+  F: number | null;
+  p: number | null;
+  k: number | null;
+  n_subjects: number | null;
+}
+
+export interface AnovaRmResponse {
+  command: string;
+  result: {
+    kind: "anova_rm";
+    depvar: string;
+    subject: string;
+    within: string;
+    between: string | null;
+    between_summary: AnovaRmBetweenSummary | null;
+    correction: "none" | "gg" | "hf";
+    rows: AnovaRmRow[];
+    n_subjects: number;
+    n_obs: number;
+  };
+  text: string;
+  r_set: Record<string, unknown>;
+  e_set: Record<string, unknown> | null;
+}
+
+// =====================================================================
+// v3.0.2 — Diagnostics
+// =====================================================================
+
+export interface ShapiroRow {
+  group: string | null;
+  n: number;
+  W: number | null;
+  p: number | null;
+  note?: string;
+}
+
+export interface ShapiroResponse {
+  command: string;
+  result: {
+    kind: "shapiro";
+    variable: string;
+    by: string | null;
+    rows: ShapiroRow[];
+  };
+  text: string;
+  r_set: Record<string, unknown>;
+  e_set: Record<string, unknown> | null;
+}
+
+export interface LeveneGroupRow {
+  group: string;
+  n: number;
+  mean: number | null;
+  sd: number | null;
+}
+
+export interface LeveneResponse {
+  command: string;
+  result: {
+    kind: "levene";
+    depvar: string;
+    groupvar: string;
+    center: "median" | "mean" | "trimmed";
+    groups: LeveneGroupRow[];
+    W: number | null;
+    df1: number;
+    df2: number;
+    p: number | null;
+  };
+  text: string;
+  r_set: Record<string, unknown>;
+  e_set: Record<string, unknown> | null;
+}
+
+// =====================================================================
+// v3.0.2 — tabstat (by-group descriptives)
+// =====================================================================
+
+export interface TabstatResponse {
+  command: string;
+  result: {
+    kind: "tabstat";
+    variables: string[];
+    stats: string[];
+    groups: string[] | null;
+    by?: string;
+    matrix:
+      | Record<string, Record<string, number | null>>
+      | Record<string, Record<string, Record<string, number | null>>>;
+  };
+  text: string;
+  r_set: Record<string, unknown>;
+  e_set: Record<string, unknown> | null;
 }

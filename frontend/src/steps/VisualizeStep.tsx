@@ -301,12 +301,17 @@ function SingleYForm({
 }: { chart: "box" | "bar"; numerics: ColumnInfo[]; categoricals: ColumnInfo[]; onRendered: (r: Rendered) => void }) {
   const [varName, setVarName] = useState(numerics[0]?.name ?? "");
   const [group, setGroup] = useState(categoricals[0]?.name ?? "");
+  // B1: sub-group support for bar charts (the canonical "8 groups × 3
+  // timepoints = 24 bars" repeated-measures figure). Off by default.
+  const [subgroup, setSubgroup] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const command = chart === "box"
     ? `graph box ${varName}${group ? `, over(${group})` : ""}`
-    : `graph bar (mean) ${varName}${group ? `, over(${group})` : ""}`;
+    : subgroup && group
+      ? `graph bar (mean) ${varName}, over(${subgroup}) over(${group}) asyvars`
+      : `graph bar (mean) ${varName}${group ? `, over(${group})` : ""}`;
 
   return (
     <div className="space-y-4">
@@ -320,10 +325,26 @@ function SingleYForm({
           options={[{ value: "", label: "— none —" }, ...categoricals.map((c) => ({ value: c.name, label: c.name }))]}
         />
       </FormRow>
+      {chart === "bar" && (
+        <FormRow label="Sub-group by (optional, for clustered bars)">
+          <Select
+            value={subgroup}
+            onChange={setSubgroup}
+            options={[
+              { value: "", label: "— none (single-level bars) —" },
+              ...categoricals
+                .filter((c) => c.name !== group)
+                .map((c) => ({ value: c.name, label: c.name })),
+            ]}
+          />
+        </FormRow>
+      )}
       <RunButton command={command} busy={busy} disabled={!varName} onClick={async () => {
         setBusy(true); setError(null);
         try {
-          const r = await api.graph(chart, { var: varName, group: group || null });
+          const body: Record<string, unknown> = { var: varName, group: group || null };
+          if (chart === "bar" && subgroup) body.subgroup = subgroup;
+          const r = await api.graph(chart, body);
           onRendered({ kind: chart, command: r.command, figure: r.figure, timestamp: Date.now() });
         } catch (e) { setError(e instanceof ApiError ? e.detail : String(e)); }
         finally { setBusy(false); }

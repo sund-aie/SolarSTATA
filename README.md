@@ -4,8 +4,11 @@ A point-and-click Stata replica for researchers — with a Pro mode for power
 users. Built to make statistical analysis approachable for dental, medical, and
 clinical research without giving up the rigor and reproducibility of Stata.
 
-> **Status:** Phase 5 (final shipping surface — graphs, exports, launchers,
-> light mode). v3.0 RC.
+> **Status:** v3.0.2 — clinical-research polish. Adds the ANOVA family
+> (one-way with Bartlett + Bonferroni/Scheffé/Sidak posthoc, two-way,
+> repeated-measures with sphericity corrections), normality / equal-variance
+> diagnostics (Shapiro-Wilk, Levene), `tabstat` by-group descriptives,
+> grouped bar charts, and a postest-actions row under every estimation card.
 
 ![Guided mode hero — clinic_patients.csv loaded with an OLS regression result.](docs/screenshots/guided.png)
 > _Screenshot placeholder — generate with `make screenshots` once the
@@ -133,6 +136,54 @@ archive/v1-v2/          previous Flask implementation, kept for cross-reference
 | File I/O | pyreadstat (.dta), pandas/pyarrow (rest) |
 | PDF | WeasyPrint |
 | Session | Anonymous cookie, in-memory, 24h idle eviction |
+
+## Statistical methods
+
+Every SolarSTATA Pro command maps to the same statsmodels/scipy routine
+that real Stata wraps. The table below is the canonical cross-reference
+between what you'd type in StataCorp's Stata and what SolarSTATA runs
+under the hood:
+
+| Real Stata | SolarSTATA Pro | Engine | Notes |
+|---|---|---|---|
+| `summarize y, detail` | `summarize y, detail` | pandas + scipy | mean, sd, percentiles, skew, kurtosis |
+| `tabulate x` / `tabulate x y` | `tabulate x` / `tabulate x y` | pandas crosstab + scipy chi² | one- and two-way frequency tables |
+| `tabstat y, by(g) stats(n mean sd)` | `tabstat y, by(g) stats(n mean sd)` | pandas groupby.agg | by-group descriptives matrix |
+| `oneway y g` | `oneway y g` | scipy.stats.f_oneway + Bartlett | always emits Bartlett's test |
+| `oneway y g, bonferroni` | `oneway y g, bonferroni` | scipy + pooled-SE pairwise | Bonferroni / Scheffé / Sidak posthoc |
+| `anova y a##b` | `anova y a##b` | statsmodels OLS + Type-II ANOVA | two-way with interaction |
+| `anova y subj##time, repeated(time)` | `anova y subj##time, repeated(time) gg` | statsmodels.AnovaRM + GG/HF ε | repeated-measures with sphericity correction; mixed between×within lands in v3.1 |
+| `swilk y` | `swilk y` | scipy.stats.shapiro | Shapiro-Wilk normality, optional by-group |
+| `robvar y, by(g)` | `robvar y, by(g)` | scipy.stats.levene | Levene's equal-variance test |
+| `regress y x1 x2, vce(robust)` | `regress y x1 x2, vce(robust)` | statsmodels OLS + HC0–HC3 / cluster | full OLS with robust / clustered SE |
+| `logit y x1 x2, or` | `logit y x1 x2, or` | statsmodels Logit | with odds-ratios, robust SE, postest |
+| `margins`, `predict`, `test` | `margins`, `predict`, `test` | statsmodels postest | available under every estimation card |
+
+### Which test do I run?
+
+A short decision tree for the most common clinical-research questions:
+
+```
+Two-group comparison
+├── Continuous outcome
+│   ├── Normal (swilk p > 0.05)?            → t-test (v3.1)
+│   └── Skewed?                              → Mann-Whitney (v3.1)
+└── Categorical outcome                      → chi² via tabulate x y
+
+Three+ groups, continuous outcome
+├── Independent, normal, equal variances     → oneway (Bartlett built-in)
+├── Independent, normal, unequal variances   → oneway then check Bartlett's p
+├── Independent, non-normal                  → Kruskal-Wallis (v3.1)
+└── Repeated measures (within-subject)       → anova_rm with gg correction
+
+Two factors, continuous outcome              → anova y a##b
+Continuous predictor + continuous outcome    → regress
+Binary outcome                                → logit (with or for odds-ratios)
+```
+
+If unsure about normality, run **swilk** first; if Shapiro rejects
+(p < 0.05) and you'd reach for ANOVA, default to the non-parametric
+equivalent (Kruskal-Wallis / Friedman lands in v3.1).
 
 ## About the bundled dataset
 
