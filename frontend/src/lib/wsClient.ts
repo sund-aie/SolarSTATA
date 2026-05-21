@@ -2,7 +2,14 @@
  *
  * Manages a single connection to /ws/pro for the lifetime of the Pro mode
  * mount. Emits typed events for `started`, `block`, `complete`, and `error`.
+ *
+ * URL resolution defers to lib/electron.ts: inside the Electron shell
+ * we connect to the dynamic sidecar port (ws://127.0.0.1:<port>/ws/pro);
+ * in browser dev we use the page's host so the Vite proxy can hand off
+ * to FastAPI on :8000.
  */
+
+import { wsUrl as resolveWsUrl } from "./electron";
 
 export type WsEvent =
   | { type: "started"; command: string }
@@ -17,12 +24,12 @@ export type WsEvent =
 export class ProWsClient {
   private ws: WebSocket | null = null;
   private listeners = new Set<(e: WsEvent) => void>();
-  private url: string;
+  private urlPromise: Promise<string>;
   private reconnectDelay = 1000;
   private wantOpen = true;
 
-  constructor(url = wsUrl()) {
-    this.url = url;
+  constructor(url?: string) {
+    this.urlPromise = url ? Promise.resolve(url) : resolveWsUrl();
   }
 
   on(listener: (e: WsEvent) => void): () => void {
@@ -49,11 +56,13 @@ export class ProWsClient {
     this.ws = null;
   }
 
-  private connect() {
+  private async connect() {
     if (this.ws && (this.ws.readyState === WebSocket.OPEN || this.ws.readyState === WebSocket.CONNECTING)) {
       return;
     }
-    this.ws = new WebSocket(this.url);
+    const url = await this.urlPromise;
+    if (!this.wantOpen) return;
+    this.ws = new WebSocket(url);
     this.ws.onopen = () => this.emit({ type: "open" });
     this.ws.onclose = () => {
       this.emit({ type: "close" });
@@ -75,9 +84,4 @@ export class ProWsClient {
   private emit(e: WsEvent) {
     for (const l of this.listeners) l(e);
   }
-}
-
-function wsUrl(): string {
-  const proto = location.protocol === "https:" ? "wss:" : "ws:";
-  return `${proto}//${location.host}/ws/pro`;
 }

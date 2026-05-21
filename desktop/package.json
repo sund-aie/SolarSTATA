@@ -1,0 +1,47 @@
+{
+  "name": "solarstata-desktop",
+  "version": "3.1.0a1",
+  "description": "Electron desktop shell for SolarSTATA",
+  "private": true,
+  "main": "build/main.js",
+  "scripts": {
+    "tsc": "tsc -p tsconfig.json",
+    "tsc:watch": "tsc -p tsconfig.json --watch",
+    "copy-static": "node ./scripts/copy-static.cjs",
+    "build": "npm run tsc && npm run copy-static",
+    "electron:dev": "npm run build && concurrently -k -n vite,electron -c blue,magenta \"npm run dev:vite\" \"wait-on http://localhost:5173 && cross-env SOLARSTATA_DEV=1 electron .\"",
+    "dev:vite": "cd ../frontend && npm run dev",
+    "electron:dev:no-vite": "npm run build && electron .",
+    "electron:build": "npm run build && electron-builder",
+    "clean": "rimraf build dist"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "@types/node": "^20.17.10",
+    "concurrently": "^9.1.2",
+    "cross-env": "^7.0.3",
+    "electron": "^33.2.1",
+    "electron-builder": "^25.1.8",
+    "rimraf": "^6.0.1",
+    "typescript": "~5.6.3",
+    "wait-on": "^8.0.1"
+  },
+  "build": {
+    "appId": "com.solarstata.desktop",
+    "productName": "SolarSTATA",
+    "files": [
+      "build/**/*",
+      "node_modules/**/*",
+      "package.json"
+    ],
+    "directories": {
+      "output": "dist"
+    },
+    "mac": {
+      "category": "public.app-category.education"
+    },
+    "win": {
+      "target": "nsis"
+    }
+  }
+}

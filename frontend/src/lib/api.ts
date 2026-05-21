@@ -1,4 +1,10 @@
-/* Typed API client. Vite proxies /api and /healthz to FastAPI on :8000. */
+/* Typed API client. Vite proxies /api and /healthz to FastAPI on :8000.
+ *
+ * When running inside the Electron shell, `window.electronAPI` is
+ * exposed by preload.ts and reports the dynamic sidecar port. We
+ * resolve a full absolute URL (http://127.0.0.1:<port>/...) and
+ * skip the Vite proxy entirely.
+ */
 
 import type {
   AnovaRmResponse,
@@ -19,9 +25,18 @@ import type {
   UploadOrChoice,
   UploadResponse,
 } from "./types";
+import { apiBase } from "./electron";
+
+const resolveUrl = async (p: string): Promise<string> => {
+  if (/^[a-z]+:\/\//i.test(p)) return p;
+  const base = await apiBase();
+  if (!base) return p;
+  return base + (p.startsWith("/") ? p : "/" + p);
+};
 
 const baseFetch = async (input: string, init: RequestInit = {}): Promise<Response> => {
-  const resp = await fetch(input, {
+  const url = await resolveUrl(input);
+  const resp = await fetch(url, {
     credentials: "include", // cookies for session
     ...init,
   });
