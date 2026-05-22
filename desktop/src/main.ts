@@ -113,9 +113,13 @@ function createMainWindow(): BrowserWindow {
 
 async function navigateToApp(win: BrowserWindow, port: number): Promise<void> {
   if (isDev) {
-    // Vite dev server. The renderer reads the backend port from
-    // window.electronAPI and bypasses Vite's proxy.
-    await win.loadURL("http://localhost:5173");
+    // Use 127.0.0.1 (not localhost) so the renderer shares a host
+    // with the backend sidecar. Cookies set by the backend on
+    // 127.0.0.1 then ride along under SameSite=Lax for cross-port
+    // fetches from the renderer; the upload→finalize handshake
+    // depends on this. Vite is bound to 127.0.0.1:5173 in
+    // vite.config.ts so this URL is always reachable.
+    await win.loadURL("http://127.0.0.1:5173");
     win.webContents.openDevTools({ mode: "detach" });
     return;
   }

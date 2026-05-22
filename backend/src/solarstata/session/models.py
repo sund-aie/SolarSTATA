@@ -110,7 +110,12 @@ class Session:
     r_results: dict[str, Any] = field(default_factory=dict)
     last_estimation: Estimation | None = None
 
-    staged_uploads: dict[str, StagedUpload] = field(default_factory=dict)
+    # NOTE: staged uploads (the intermediate state of the xlsx
+    # picker flow) live in a process-wide store now —
+    # solarstata.session.staging — keyed by file_id alone. This
+    # makes the upload→finalize handshake robust under the
+    # Electron desktop shell, where cross-host cookies don't ride
+    # along reliably.
 
     command_history: list[str] = field(default_factory=list)
 

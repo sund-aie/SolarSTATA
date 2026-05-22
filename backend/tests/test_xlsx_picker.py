@@ -119,3 +119,59 @@ def test_csv_path_unaffected_by_new_logic(client: TestClient, tmp_path: Path) ->
         resp = client.post("/api/data/upload", files={"file": ("tiny.csv", fh, "text/csv")})
     assert resp.status_code == 200
     assert "requires_choice" not in resp.json()
+
+
+def test_finalize_resolves_across_sessions(quirky_workbook: Path) -> None:
+    """Regression for the Electron cross-host cookie loss.
+
+    The desktop renderer (localhost:5173) and the sidecar
+    (127.0.0.1:<dynamic>) are different hosts, so the session cookie
+    set by the upload response doesn't ride along on the follow-up
+    finalize POST. Two distinct TestClient instances — each minting
+    its own session — must still complete the staging→finalize
+    handshake, because the staging store is keyed by file_id alone.
+    """
+    from fastapi.testclient import TestClient
+    from solarstata.main import app
+
+    uploader = TestClient(app)
+    finalizer = TestClient(app)
+
+    with quirky_workbook.open("rb") as fh:
+        stage = uploader.post(
+            "/api/data/upload",
+            files={"file": ("research.xlsx", fh, "application/octet-stream")},
+        ).json()
+
+    file_id = stage["file_id"]
+    assert file_id  # ensure we actually staged
+
+    # Different client, different session cookie. This is the call
+    # that used to fail with 404 ("Unknown staged file") inside the
+    # Electron shell.
+    resp = finalizer.post(
+        "/api/data/upload/finalize",
+        json={"file_id": file_id, "sheet": "Tidy", "header_row": 5},
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["columns"] == ["patient_id", "age", "sex"]
+    assert body["n_obs"] == 3
+
+
+def test_sheets_resolves_across_sessions(quirky_workbook: Path) -> None:
+    """The /sheets read-side also has to work across sessions."""
+    from fastapi.testclient import TestClient
+    from solarstata.main import app
+
+    uploader = TestClient(app)
+    reader = TestClient(app)
+
+    with quirky_workbook.open("rb") as fh:
+        stage = uploader.post(
+            "/api/data/upload",
+            files={"file": ("research.xlsx", fh, "application/octet-stream")},
+        ).json()
+
+    listing = reader.get(f"/api/data/sheets?file_id={stage['file_id']}").json()
+    assert {s["name"] for s in listing["sheets"]} == {"Notes", "Tidy"}

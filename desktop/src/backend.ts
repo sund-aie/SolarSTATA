@@ -46,18 +46,59 @@ function repoRoot(): string {
   return path.resolve(__dirname, "..", "..");
 }
 
+/* Resolve which Python interpreter to spawn uvicorn under.
+ *
+ * Order:
+ *   1. SOLARSTATA_PYTHON env var (lets the caller override anything)
+ *   2. <repoRoot>/.venv/bin/python3 (or .venv/Scripts/python.exe on Win)
+ *   3. <repoRoot>/backend/.venv/bin/python3 (legacy / Makefile default)
+ *   4. python3 / python on PATH
+ *
+ * This removes the need to `source .venv/bin/activate` before
+ * `npm run electron:dev`.
+ */
+function resolveDevPython(root: string): string {
+  const isWin = process.platform === "win32";
+  const candidates: string[] = [];
+
+  if (process.env.SOLARSTATA_PYTHON) {
+    candidates.push(process.env.SOLARSTATA_PYTHON);
+  }
+
+  const venvBin = isWin
+    ? path.join("Scripts", "python.exe")
+    : path.join("bin", "python3");
+  candidates.push(path.join(root, ".venv", venvBin));
+  // The bin/python symlink is the conventional name on some venvs.
+  if (!isWin) candidates.push(path.join(root, ".venv", "bin", "python"));
+  candidates.push(path.join(root, "backend", ".venv", venvBin));
+  if (!isWin) candidates.push(path.join(root, "backend", ".venv", "bin", "python"));
+
+  for (const c of candidates) {
+    try {
+      if (fs.existsSync(c) && fs.statSync(c).isFile()) {
+        logLine(`python: resolved interpreter ${c}`);
+        return c;
+      }
+    } catch {
+      // not readable — skip
+    }
+  }
+  const fallback = isWin ? "python" : "python3";
+  logLine(`python: no .venv found, falling back to PATH ${fallback}`);
+  return fallback;
+}
+
 function getBackendCommand(port: number): { cmd: string; args: string[]; cwd: string; env: NodeJS.ProcessEnv } {
   const root = repoRoot();
   const env: NodeJS.ProcessEnv = {
     ...process.env,
     SOLARSTATA_PORT: String(port),
+    SOLARSTATA_DESKTOP: "1",
     PYTHONUNBUFFERED: "1",
   };
   if (process.env.SOLARSTATA_DEV) {
-    const venvPy = process.platform === "win32"
-      ? path.join(root, "backend", ".venv", "Scripts", "python.exe")
-      : path.join(root, "backend", ".venv", "bin", "python");
-    const pyCmd = fs.existsSync(venvPy) ? venvPy : (process.platform === "win32" ? "python" : "python3");
+    const pyCmd = resolveDevPython(root);
     return {
       cmd: pyCmd,
       args: ["-m", "uvicorn", "solarstata.main:app",

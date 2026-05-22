@@ -9,16 +9,19 @@ import pytest
 from fastapi.testclient import TestClient
 
 from solarstata.main import app
+from solarstata.session import staging
 from solarstata.session.store import session_store
 from solarstata.walkthroughs.datasets import CLINIC_PATIENTS_CSV, CLINIC_PATIENTS_DTA
 
 
 @pytest.fixture(autouse=True)
 def _reset_session_store():
-    """Each test gets a clean store."""
+    """Each test gets a clean session store + staging store."""
     session_store._sessions.clear()
+    staging.clear()
     yield
     session_store._sessions.clear()
+    staging.clear()
 
 
 @pytest.fixture

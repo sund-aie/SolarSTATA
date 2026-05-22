@@ -1,5 +1,12 @@
 """Data routes: upload (with optional staging for multi-sheet xlsx),
-preview, columns, histogram, sheets, upload/finalize."""
+preview, columns, histogram, sheets, upload/finalize.
+
+Staged uploads (the intermediate state between accepting an xlsx
+and committing a chosen sheet to a frame) live in a process-wide
+store keyed by file_id — see `..session.staging`. This makes the
+upload→finalize handshake robust under the Electron desktop shell,
+where cross-host cookies don't ride along reliably.
+"""
 
 from __future__ import annotations
 
@@ -15,6 +22,7 @@ from pydantic import BaseModel, Field
 from ..config import settings
 from ..engine import compute_bins
 from ..io import list_xlsx_sheets, read_dataset, sniff_format
+from ..session import staging
 from ..session.models import Session, StagedUpload
 from ._jsonsafe import safe
 from .deps import get_session
@@ -66,13 +74,13 @@ async def upload(
             raise HTTPException(status_code=400, detail=f"Could not read workbook: {exc}")
 
         file_id = uuid.uuid4().hex
-        session.staged_uploads[file_id] = StagedUpload(
+        staging.put(StagedUpload(
             file_id=file_id,
             path=str(tmp_path),
             original_filename=file.filename,
             format=fmt,
             sheets=sheets,
-        )
+        ))
         return safe({
             "requires_choice": True,
             "file_id": file_id,
@@ -105,10 +113,13 @@ async def upload(
 @router.get("/sheets")
 def staged_sheets(
     file_id: str = Query(..., min_length=1),
-    session: Session = Depends(get_session),
 ) -> dict:
-    """Return the sheet metadata for a previously staged xlsx upload."""
-    staged = session.staged_uploads.get(file_id)
+    """Return the sheet metadata for a previously staged xlsx upload.
+
+    Lookups are by file_id from the process-wide staging store; no
+    session cookie required (which matters for the Electron shell).
+    """
+    staged = staging.get(file_id)
     if staged is None:
         raise HTTPException(status_code=404, detail=f"Unknown staged file: {file_id}")
     return safe({
@@ -131,8 +142,14 @@ def finalize_upload(
     req: FinalizeRequest,
     session: Session = Depends(get_session),
 ) -> dict:
-    """Finalize a staged upload using a chosen sheet and header row."""
-    staged = session.staged_uploads.get(req.file_id)
+    """Finalize a staged upload using a chosen sheet and header row.
+
+    The staged file is looked up by file_id alone (process-wide store),
+    so this call doesn't depend on the upload-side session cookie
+    surviving the round-trip. The committed frame still lands on the
+    caller's session for the rest of the analysis flow.
+    """
+    staged = staging.get(req.file_id)
     if staged is None:
         raise HTTPException(status_code=404, detail=f"Unknown staged file: {req.file_id}")
 
@@ -150,7 +167,7 @@ def finalize_upload(
         raise HTTPException(status_code=400, detail=f"Failed to read file: {exc}")
     finally:
         tmp_path.unlink(missing_ok=True)
-        session.staged_uploads.pop(req.file_id, None)
+        staging.pop(req.file_id)
 
     frame.source_filename = staged.original_filename
     session.set_frame(frame, make_current=True)

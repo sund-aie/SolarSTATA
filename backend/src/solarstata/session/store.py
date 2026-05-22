@@ -36,6 +36,21 @@ class SessionStore:
             self._sessions[session_id] = session
             return session
 
+    def create_with_id(self, session_id: str) -> Session:
+        """Create (or return existing) session under a fixed id.
+
+        Used by desktop mode where we want a deterministic singleton
+        session rather than a cookie-derived random one.
+        """
+        with self._lock:
+            existing = self._sessions.get(session_id)
+            if existing is not None:
+                existing.touch()
+                return existing
+            session = Session(session_id=session_id)
+            self._sessions[session_id] = session
+            return session
+
     def delete(self, session_id: str) -> None:
         with self._lock:
             self._sessions.pop(session_id, None)

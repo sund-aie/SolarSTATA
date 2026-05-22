@@ -9,7 +9,7 @@
     "tsc:watch": "tsc -p tsconfig.json --watch",
     "copy-static": "node ./scripts/copy-static.cjs",
     "build": "npm run tsc && npm run copy-static",
-    "electron:dev": "npm run build && concurrently -k -n vite,electron -c blue,magenta \"npm run dev:vite\" \"wait-on http://localhost:5173 && cross-env SOLARSTATA_DEV=1 electron .\"",
+    "electron:dev": "npm run build && concurrently -k -n vite,electron -c blue,magenta \"npm run dev:vite\" \"wait-on http://127.0.0.1:5173 && cross-env SOLARSTATA_DEV=1 electron .\"",
     "dev:vite": "cd ../frontend && npm run dev",
     "electron:dev:no-vite": "npm run build && electron .",
     "electron:build": "npm run build && electron-builder",
