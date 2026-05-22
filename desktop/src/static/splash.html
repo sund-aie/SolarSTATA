@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>SolarSTATA — starting…</title>
+<style>
+  :root {
+    color-scheme: dark;
+  }
+  html, body {
+    margin: 0;
+    height: 100%;
+    background: #0e0d0b;
+    color: #e6e2d8;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+  body {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 24px;
+  }
+  .logo {
+    font-family: "Georgia", "Times New Roman", serif;
+    font-style: italic;
+    font-weight: 600;
+    font-size: 96px;
+    color: #d4a437;
+    line-height: 1;
+    text-shadow: 0 0 24px rgba(212, 164, 55, 0.25);
+  }
+  .name {
+    letter-spacing: 0.18em;
+    font-size: 13px;
+    text-transform: uppercase;
+    color: #d4a437;
+  }
+  #msg {
+    font-size: 13px;
+    color: #b9b3a5;
+  }
+  #detail {
+    font-family: ui-monospace, "SF Mono", Monaco, Consolas, monospace;
+    font-size: 11px;
+    color: #7a7568;
+    max-width: 520px;
+    text-align: center;
+    white-space: pre-wrap;
+  }
+  body[data-state="failed"] .logo { color: #b65548; }
+  body[data-state="failed"] #msg { color: #ddc0a8; }
+  .spinner {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    border: 2px solid rgba(212, 164, 55, 0.18);
+    border-top-color: #d4a437;
+    animation: spin 0.9s linear infinite;
+  }
+  body[data-state="failed"] .spinner { display: none; }
+  @keyframes spin {
+    to { transform: rotate(360deg); }
+  }
+</style>
+</head>
+<body data-state="loading">
+  <div class="logo">S</div>
+  <div class="name">SolarSTATA</div>
+  <div class="spinner"></div>
+  <div id="msg">Starting backend…</div>
+  <div id="detail"></div>
+</body>
+</html>
