@@ -12,8 +12,14 @@
     "electron:dev": "npm run build && concurrently -k -n vite,electron -c blue,magenta \"npm run dev:vite\" \"wait-on http://127.0.0.1:5173 && cross-env SOLARSTATA_DEV=1 electron .\"",
     "dev:vite": "cd ../frontend && npm run dev",
     "electron:dev:no-vite": "npm run build && electron .",
+    "build:backend": "node ./scripts/build-backend.cjs",
+    "build:frontend": "cd ../frontend && npm run build",
+    "build:all": "npm run build:backend && npm run build:frontend && npm run build",
+    "dist:mac": "npm run build:all && electron-builder --mac",
+    "dist:win": "npm run build:all && electron-builder --win",
+    "dist:linux": "npm run build:all && electron-builder --linux",
     "electron:build": "npm run build && electron-builder",
-    "clean": "rimraf build dist"
+    "clean": "rimraf build dist ../backend/dist ../backend/build"
   },
   "dependencies": {},
   "devDependencies": {
@@ -29,19 +35,56 @@
   "build": {
     "appId": "com.solarstata.desktop",
     "productName": "SolarSTATA",
+    "asar": true,
     "files": [
       "build/**/*",
       "node_modules/**/*",
-      "package.json"
+      "package.json",
+      "!**/{*.ts,*.map,tsconfig.json}"
+    ],
+    "extraResources": [
+      {
+        "from": "../backend/dist/solarstata-backend",
+        "to": "solarstata-backend",
+        "filter": ["**/*"]
+      },
+      {
+        "from": "../frontend/dist",
+        "to": "frontend",
+        "filter": ["**/*"]
+      }
     ],
     "directories": {
-      "output": "dist"
+      "output": "dist",
+      "buildResources": "build-resources"
     },
     "mac": {
-      "category": "public.app-category.education"
+      "category": "public.app-category.education",
+      "target": ["dmg"],
+      "hardenedRuntime": false,
+      "identity": null
+    },
+    "dmg": {
+      "title": "SolarSTATA",
+      "contents": [
+        { "x": 130, "y": 220, "type": "file" },
+        { "x": 410, "y": 220, "type": "link", "path": "/Applications" }
+      ]
     },
     "win": {
-      "target": "nsis"
+      "target": ["nsis"]
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "SolarSTATA"
+    },
+    "linux": {
+      "target": ["AppImage"],
+      "category": "Education"
     }
   }
 }

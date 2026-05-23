@@ -123,11 +123,24 @@ async function navigateToApp(win: BrowserWindow, port: number): Promise<void> {
     win.webContents.openDevTools({ mode: "detach" });
     return;
   }
-  // Production bundle (file://). Lands in v3.1B; for now we fall
-  // back to a placeholder so dev parity holds.
-  const indexHtml = path.join(__dirname, "..", "..", "frontend", "dist", "index.html");
+  // Production: load the built frontend from disk via file://.
+  // electron-builder copies frontend/dist into resources/frontend
+  // via the extraResources block in package.json. Outside a
+  // packaged build (e.g., direct `electron .` against build/),
+  // fall back to the in-repo frontend/dist for parity.
+  const indexHtml = resolveBundledIndexHtml();
   await win.loadFile(indexHtml);
   logLine(`renderer loaded: ${indexHtml} backend port=${port}`);
+}
+
+function resolveBundledIndexHtml(): string {
+  const resourcesPath = (process as NodeJS.Process & { resourcesPath?: string }).resourcesPath;
+  const repoFallback = path.join(__dirname, "..", "..", "frontend", "dist", "index.html");
+  if (resourcesPath) {
+    const packaged = path.join(resourcesPath, "frontend", "index.html");
+    if (require("fs").existsSync(packaged)) return packaged;
+  }
+  return repoFallback;
 }
 
 // IPC: renderer asks for the backend port via preload.

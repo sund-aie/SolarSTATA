@@ -46,6 +46,27 @@ function repoRoot(): string {
   return path.resolve(__dirname, "..", "..");
 }
 
+/* In a packaged Electron app, extraResources land under
+ * process.resourcesPath:
+ *   macOS:   SolarSTATA.app/Contents/Resources/solarstata-backend/...
+ *   Windows: <install>/resources/solarstata-backend/...
+ * In dev (npm run electron:dev) and direct-node smoke runs, fall
+ * back to the in-repo PyInstaller dist folder so the same code path
+ * can be exercised against a local build.
+ */
+function bundledBackendDir(root: string): string {
+  const resourcesPath = (process as NodeJS.Process & { resourcesPath?: string }).resourcesPath;
+  // Heuristic: when Electron-packaged, the resourcesPath sits next
+  // to the app binary (NOT inside the source tree). If it's inside
+  // the source tree we're running unpacked-dev → use the local
+  // backend/dist build instead.
+  const inSourceTree = resourcesPath && resourcesPath.startsWith(root);
+  if (resourcesPath && !inSourceTree) {
+    return path.join(resourcesPath, "solarstata-backend");
+  }
+  return path.join(root, "backend", "dist", "solarstata-backend");
+}
+
 /* Resolve which Python interpreter to spawn uvicorn under.
  *
  * Order:
@@ -112,16 +133,21 @@ function getBackendCommand(port: number): { cmd: string; args: string[]; cwd: st
       },
     };
   }
-  // Production: PyInstaller-bundled binary (filled in by v3.1B).
+  // Production: PyInstaller-bundled launcher. The exe and its
+  // _internal/ deps live together in <resources>/solarstata-backend/
+  // The run_server entry reads SOLARSTATA_PORT from env (already set
+  // above) so no positional args are needed.
+  const bundleDir = bundledBackendDir(root);
   const exe = process.platform === "win32" ? "solarstata-backend.exe" : "solarstata-backend";
-  const resourcesPath = (process as NodeJS.Process & { resourcesPath?: string }).resourcesPath;
-  const bundled = resourcesPath
-    ? path.join(resourcesPath, "backend", exe)
-    : path.join(root, "backend", "dist", "solarstata-backend", exe);
+  const bundled = path.join(bundleDir, exe);
+  logLine(`backend: production bundle path ${bundled}`);
+  if (!fs.existsSync(bundled)) {
+    logLine(`backend: WARNING bundled launcher missing at ${bundled}`);
+  }
   return {
     cmd: bundled,
-    args: ["--port", String(port)],
-    cwd: path.dirname(bundled),
+    args: [],
+    cwd: bundleDir,
     env,
   };
 }
