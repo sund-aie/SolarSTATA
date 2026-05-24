@@ -24,6 +24,13 @@ import {
 } from "./backend.js";
 import { openLog, closeLog, logLine } from "./logger.js";
 
+// Pin the runtime app name to the user-facing brand. Electron's
+// app.getName() otherwise resolves to the package.json "name" field
+// (solarstata-desktop) since productName is electron-builder
+// metadata, not runtime data. getPath("logs") and other userData
+// paths derive from getName(), so this must run BEFORE openLog().
+app.setName("SolarSTATA");
+
 const isDev = !!process.env.SOLARSTATA_DEV;
 let mainWindow: BrowserWindow | null = null;
 let backend: BackendHandle | null = null;
