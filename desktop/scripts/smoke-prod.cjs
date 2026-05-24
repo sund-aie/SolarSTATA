@@ -1,9 +1,11 @@
-/* Headless smoke for the PRODUCTION code path.
+/* Headless smoke for the PyInstaller-bundled launcher itself.
  *
- * Same lifecycle as scripts/smoke.cjs but with SOLARSTATA_DEV
- * unset, forcing backend.ts to resolve the PyInstaller-bundled
- * launcher at backend/dist/solarstata-backend/. Confirms the
- * production spawn path before any electron-builder packaging.
+ * Spawns the in-repo backend/dist/solarstata-backend binary,
+ * waits for /healthz, and shuts it down — confirming the bundle
+ * boots and serves traffic. This does NOT exercise the packaged-
+ * Electron path-resolution branch in bundledBackendDir (plain
+ * node never sets process.resourcesPath); that's covered by the
+ * unit tests in tests/bundle-path.test.cjs.
  *
  * Usage:  node scripts/smoke-prod.cjs
  *

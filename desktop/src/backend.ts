@@ -53,9 +53,17 @@ function repoRoot(): string {
  * In dev (npm run electron:dev) and direct-node smoke runs, fall
  * back to the in-repo PyInstaller dist folder so the same code path
  * can be exercised against a local build.
+ *
+ * Dependencies (`resourcesPath`, `exists`) are injected via default
+ * args so the behaviour is identical at every existing call site,
+ * but unit tests can supply fakes without spinning up Electron or
+ * touching the real filesystem.
  */
-function bundledBackendDir(root: string): string {
-  const resourcesPath = (process as NodeJS.Process & { resourcesPath?: string }).resourcesPath;
+export function bundledBackendDir(
+  root: string,
+  resourcesPath: string | undefined = (process as NodeJS.Process & { resourcesPath?: string }).resourcesPath,
+  exists: (p: string) => boolean = fs.existsSync,
+): string {
   // Packaged Electron app: extraResources land directly under
   // process.resourcesPath as solarstata-backend/. Prefer that
   // location whenever the bundle is actually present there.
@@ -68,7 +76,7 @@ function bundledBackendDir(root: string): string {
   // and works for both the packaged app and direct-node smoke runs.
   if (resourcesPath) {
     const packaged = path.join(resourcesPath, "solarstata-backend");
-    if (fs.existsSync(packaged)) return packaged;
+    if (exists(packaged)) return packaged;
   }
   // Dev / direct-node smoke runs: the in-repo PyInstaller dist folder.
   return path.join(root, "backend", "dist", "solarstata-backend");

@@ -19,6 +19,7 @@
     "dist:win": "npm run build:all && electron-builder --win",
     "dist:linux": "npm run build:all && electron-builder --linux",
     "electron:build": "npm run build && electron-builder",
+    "test": "npm run build && node --test tests/*.test.cjs",
     "clean": "rimraf build dist ../backend/dist ../backend/build"
   },
   "dependencies": {},
