@@ -56,14 +56,21 @@ function repoRoot(): string {
  */
 function bundledBackendDir(root: string): string {
   const resourcesPath = (process as NodeJS.Process & { resourcesPath?: string }).resourcesPath;
-  // Heuristic: when Electron-packaged, the resourcesPath sits next
-  // to the app binary (NOT inside the source tree). If it's inside
-  // the source tree we're running unpacked-dev → use the local
-  // backend/dist build instead.
-  const inSourceTree = resourcesPath && resourcesPath.startsWith(root);
-  if (resourcesPath && !inSourceTree) {
-    return path.join(resourcesPath, "solarstata-backend");
+  // Packaged Electron app: extraResources land directly under
+  // process.resourcesPath as solarstata-backend/. Prefer that
+  // location whenever the bundle is actually present there.
+  //
+  // NB: we deliberately do NOT use a path-prefix heuristic to detect
+  // "packaged". In the asar build, repoRoot() resolves via __dirname
+  // up two levels and collapses to *equal* resourcesPath, so any
+  // resourcesPath.startsWith(root) check is true and misroutes to the
+  // dev fallback (the ENOENT bug). An existence check is unambiguous
+  // and works for both the packaged app and direct-node smoke runs.
+  if (resourcesPath) {
+    const packaged = path.join(resourcesPath, "solarstata-backend");
+    if (fs.existsSync(packaged)) return packaged;
   }
+  // Dev / direct-node smoke runs: the in-repo PyInstaller dist folder.
   return path.join(root, "backend", "dist", "solarstata-backend");
 }
 

@@ -165,9 +165,12 @@ def finalize_upload(
         raise HTTPException(status_code=400, detail=str(exc))
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=400, detail=f"Failed to read file: {exc}")
-    finally:
-        tmp_path.unlink(missing_ok=True)
-        staging.pop(req.file_id)
+    # NB: deliberately do NOT pop the staged upload or unlink its temp
+    # file here. The guided multi-sheet flow calls finalize repeatedly
+    # for the same file_id — pick a sheet, preview, adjust the header
+    # row, "← Back to sheets" and re-pick — so finalize must be
+    # replayable. The scratch file is reclaimed when the next upload is
+    # staged (see `upload`), or on process exit.
 
     frame.source_filename = staged.original_filename
     session.set_frame(frame, make_current=True)

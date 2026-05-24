@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -31,12 +32,20 @@ class Settings(BaseSettings):
         "http://127.0.0.1:3000",
     ]
 
-    # Single-user desktop build. When set (SOLARSTATA_DESKTOP=1 from
-    # the Electron sidecar spawn), SessionMiddleware routes every
-    # request to the same in-memory session regardless of cookie —
-    # belt-and-braces protection against cross-host cookie loss in
-    # the desktop shell.
-    desktop_mode: bool = False
+    # Single-user desktop build. Enabled by the Electron sidecar spawn,
+    # which sets SOLARSTATA_DESKTOP=1. NB: under env_prefix the bare
+    # field would resolve to SOLARSTATA_DESKTOP_MODE, which is NOT what
+    # the shell sets — that mismatch silently left this False and broke
+    # the packaged app (file:// renderer can't send the SameSite session
+    # cookie cross-origin to the 127.0.0.1 sidecar, so without the
+    # singleton every request gets a fresh session and frames vanish).
+    # Alias explicitly to the name the shell sets; accept the prefixed
+    # form too for robustness. When on, SessionMiddleware routes every
+    # request to one in-memory session regardless of cookie.
+    desktop_mode: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("SOLARSTATA_DESKTOP", "SOLARSTATA_DESKTOP_MODE"),
+    )
 
 
 settings = Settings()
