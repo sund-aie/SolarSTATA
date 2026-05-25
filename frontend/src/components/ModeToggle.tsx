@@ -54,7 +54,7 @@ export function ModeToggle() {
               aria-selected={active}
               onClick={() => setMode(m.value)}
               data-mode={m.value}
-              className={`relative z-[2] py-[5px] px-4 font-sans text-[12px] font-medium rounded-full tracking-[0.01em] cursor-pointer transition-colors ${
+              className={`flex-1 relative z-[2] py-[5px] px-4 font-sans text-[12px] font-medium rounded-full tracking-[0.01em] cursor-pointer transition-colors text-center ${
                 active ? "text-bg" : "text-text-muted hover:text-text"
               }`}
             >
