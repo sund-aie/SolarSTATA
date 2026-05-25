@@ -5,6 +5,45 @@ moves on-disk state, changes installation behaviour, or
 otherwise needs a migration note for existing installs lands
 here.
 
+## [3.2.0-a1] – 2026-05-24
+
+Part 1 of the v3.2 polish pass — import-format guidance.
+
+### Import-format guide
+
+A "prepare your sheet" panel now sits above the dropzone on the
+Import step. Five product-voice rules cover the file-layout
+cases that bite users hardest (row 1 = column names, one row per
+observation, no merged cells, no title rows above the header,
+units in the column name not next to each value), plus a small
+good-vs-bad mini-sheet visual showing both layouts side by side.
+Always expanded on first visit; user collapse is remembered in
+`localStorage["solarstata.format_guide_collapsed"]`.
+
+### Pre-flight header detection
+
+A new `POST /api/data/preflight` route inspects a staged xlsx
+upload and returns:
+
+- the detected header row (heuristic finds the first row of
+  mostly-text cells followed by a data-like row — fixes the
+  canonical TIDY LONG FORMAT case where the header sits on row
+  5 under four note/blank rows)
+- the row positions above it that will be skipped
+- a column-kind summary (numeric / categorical / id / text counts)
+- structural issues: merged cells, hidden rows, hidden columns
+
+The HeaderRowPicker fires preflight on mount, defaults its
+auto-pick to the detected row instead of always row 1, and
+shows a status strip above the row table that reads back what
+was found. Wording for the canonical case:
+
+> Header detected on row 5 — rows 1 to 4 look like notes, we
+> will skip them.
+
+User clicks on the row table still take precedence — the
+auto-pick only flows in when the user hasn't already overridden.
+
 ## [3.1.0-a1] – 2026-05-24
 
 v3.1C cleanup pass on top of the v3.1 desktop packaging.
