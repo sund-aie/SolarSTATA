@@ -44,6 +44,17 @@ was found. Wording for the canonical case:
 User clicks on the row table still take precedence — the
 auto-pick only flows in when the user hasn't already overridden.
 
+### Error-bar source control on bar and line charts
+
+Bar and line charts now expose an "Error bars" selector with four
+options: none, SD, SEM, 95% CI. The chosen indicator labels the
+y-axis directly ("mean VHN ± SD" / "± SEM" / "± 95% CI") so the
+figure is self-documenting; titles are no longer suffixed with
+the indicator. Backward-compat: bar defaults to ci95 (matches
+pre-3.2 behaviour); line defaults to none (raw trace, no
+aggregation). Switching line to sd / sem / ci95 aggregates by
+x-level within each group and renders symmetric error bars.
+
 ### Significance brackets on bar charts
 
 Bar charts now overlay significance brackets when the user has
