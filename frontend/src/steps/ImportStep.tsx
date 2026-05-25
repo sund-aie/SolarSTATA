@@ -185,6 +185,7 @@ export function ImportStep() {
 
       {phase.kind === "picking_header" && (
         <HeaderRowPicker
+          fileId={phase.staged.file_id}
           filename={phase.staged.original_filename}
           sheet={phase.sheet}
           onConfirm={onConfirmHeader}

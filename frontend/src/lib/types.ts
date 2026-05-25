@@ -52,6 +52,29 @@ export type UploadOrChoice = UploadResponse | StagedUploadResponse;
 export const isStagedResponse = (r: UploadOrChoice): r is StagedUploadResponse =>
   (r as StagedUploadResponse).requires_choice === true;
 
+export interface PreflightColumnKinds {
+  numeric: number;
+  categorical: number;
+  identifier: number;
+  string: number;
+}
+
+export interface PreflightCellIssues {
+  merged_cells: number;
+  hidden_rows: number;
+  hidden_cols: number;
+}
+
+export interface PreflightResponse {
+  sheet: string;
+  detected_header_row: number;       // 1-based
+  notes_rows: number[];              // every row above the header, content or blank
+  header_cells: string[];
+  column_kinds: PreflightColumnKinds;
+  cell_issues: PreflightCellIssues;
+  n_rows_after_header: number;
+}
+
 export interface ColumnsResponse {
   frame: string;
   columns: ColumnInfo[];

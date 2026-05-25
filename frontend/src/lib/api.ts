@@ -16,6 +16,7 @@ import type {
   MarginsResponse,
   OnewayResponse,
   PredictResponse,
+  PreflightResponse,
   RegressResponse,
   ShapiroResponse,
   SummarizeResult,
@@ -80,6 +81,18 @@ export const api = {
       body: JSON.stringify(params),
     });
     return (await resp.json()) as UploadResponse;
+  },
+
+  preflight: async (params: {
+    file_id: string;
+    sheet?: string | null;
+  }): Promise<PreflightResponse> => {
+    const resp = await baseFetch("/api/data/preflight", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(params),
+    });
+    return (await resp.json()) as PreflightResponse;
   },
 
   columns: async (frame = "default"): Promise<ColumnsResponse> => {
