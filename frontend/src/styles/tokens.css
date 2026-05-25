@@ -20,10 +20,10 @@
   --accent-glow: rgba(212, 179, 106, 0.22);
 
   /* Semantic */
-  --good: #8FAA88;
-  --good-soft: rgba(143, 170, 136, 0.14);
-  --warn: #D89B7E;
-  --warn-soft: rgba(216, 155, 126, 0.14);
+  --good: #8BB47A;
+  --good-soft: rgba(139, 180, 122, 0.14);
+  --warn: #C97A5A;
+  --warn-soft: rgba(201, 122, 90, 0.14);
   --info: #8FA8C4;
   --info-soft: rgba(143, 168, 196, 0.14);
 
