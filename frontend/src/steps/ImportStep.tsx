@@ -11,6 +11,7 @@ import { api, ApiError } from "../lib/api";
 import { useApp } from "../state/store";
 import type { StagedSheet, StagedUploadResponse, UploadResponse } from "../lib/types";
 import { isStagedResponse } from "../lib/types";
+import { FormatGuide } from "../components/FormatGuide";
 import { SheetPicker } from "../components/SheetPicker";
 import { HeaderRowPicker } from "../components/HeaderRowPicker";
 
@@ -123,6 +124,7 @@ export function ImportStep() {
 
       {phase.kind === "drop" && (
         <>
+          <FormatGuide />
           <div
             role="button"
             tabIndex={0}
