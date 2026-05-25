@@ -21,7 +21,7 @@ from pydantic import BaseModel, Field
 
 from ..config import settings
 from ..engine import compute_bins
-from ..io import list_xlsx_sheets, read_dataset, sniff_format
+from ..io import list_xlsx_sheets, preflight_xlsx, read_dataset, sniff_format
 from ..session import staging
 from ..session.models import Session, StagedUpload
 from ._jsonsafe import safe
@@ -128,6 +128,36 @@ def staged_sheets(
         "original_filename": staged.original_filename,
         "sheets": staged.sheets,
     })
+
+
+class PreflightRequest(BaseModel):
+    file_id: str = Field(..., min_length=1)
+    sheet: str | None = None
+
+
+@router.post("/preflight")
+def preflight(req: PreflightRequest) -> dict:
+    """Inspect a staged xlsx upload before finalizing.
+
+    Returns the auto-detected header row, the row positions above it
+    that will be skipped, a column-kind summary, and any structural
+    issues (merged cells, hidden rows/cols) worth surfacing in the
+    pre-flight strip. Pure read — does not commit the dataset and
+    does not touch the staging store beyond looking it up.
+    """
+    staged = staging.get(req.file_id)
+    if staged is None:
+        raise HTTPException(status_code=404, detail=f"Unknown staged file: {req.file_id}")
+    if staged.format != "xlsx":
+        raise HTTPException(
+            status_code=400,
+            detail=f"Pre-flight is xlsx-only; staged file is .{staged.format}",
+        )
+    try:
+        result = preflight_xlsx(staged.path, sheet=req.sheet)
+    except KeyError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return safe(result)
 
 
 class FinalizeRequest(BaseModel):
