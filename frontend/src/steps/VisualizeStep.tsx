@@ -10,6 +10,7 @@
 import { useMemo, useState } from "react";
 import { api, ApiError } from "../lib/api";
 import type { ColumnInfo, VarKind } from "../lib/types";
+import { lastOnewayPosthoc, type OnewayPosthocBlock } from "../lib/posthoc";
 import { useApp } from "../state/store";
 import { CommandPreview } from "../components/CommandPreview";
 import { ResultsCard } from "../components/ResultsCard";
@@ -311,8 +312,23 @@ function SingleYForm({
   // timepoints = 24 bars" repeated-measures figure). Off by default.
   const [subgroup, setSubgroup] = useState("");
   const [err, setErr] = useState<ErrSource>("ci95");
+  const [showBrackets, setShowBrackets] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Significance brackets — only available on single-group bar
+  // charts AND only when the user has already run a matching oneway
+  // with posthoc enabled. We render what the engine already
+  // computed; no new statistics here.
+  const analyzeRecords = useApp((s) => s.analyzeRecords);
+  const matchingPosthoc: OnewayPosthocBlock | null = useMemo(
+    () => (chart === "bar" && varName && group
+      ? lastOnewayPosthoc(analyzeRecords, varName, group)
+      : null),
+    [chart, varName, group, analyzeRecords],
+  );
+  const bracketsDisabledByGrouping = Boolean(subgroup);
+  const bracketsActive = chart === "bar" && !!matchingPosthoc && showBrackets && !bracketsDisabledByGrouping;
 
   const command = chart === "box"
     ? `graph box ${varName}${group ? `, over(${group})` : ""}`
@@ -349,12 +365,24 @@ function SingleYForm({
       {chart === "bar" && (
         <ErrorBarRow value={err} onChange={setErr} />
       )}
+      {chart === "bar" && matchingPosthoc && (
+        <BracketsRow
+          method={matchingPosthoc.method}
+          checked={showBrackets}
+          onChange={setShowBrackets}
+          disabled={bracketsDisabledByGrouping}
+          disabledReason={bracketsDisabledByGrouping
+            ? "Brackets apply to single-group comparisons."
+            : undefined}
+        />
+      )}
       <RunButton command={command} busy={busy} disabled={!varName} onClick={async () => {
         setBusy(true); setError(null);
         try {
           const body: Record<string, unknown> = { var: varName, group: group || null };
           if (chart === "bar" && subgroup) body.subgroup = subgroup;
           if (chart === "bar") body.err = err;
+          if (bracketsActive && matchingPosthoc) body.pairwise = matchingPosthoc;
           const r = await api.graph(chart, body);
           onRendered({ kind: chart, command: r.command, figure: r.figure, timestamp: Date.now() });
         } catch (e) { setError(e instanceof ApiError ? e.detail : String(e)); }
@@ -384,6 +412,39 @@ function ErrorBarRow({
         onChange={(v) => onChange(v as ErrSource)}
         options={ERR_OPTIONS}
       />
+    </FormRow>
+  );
+}
+
+function BracketsRow({
+  method, checked, onChange, disabled, disabledReason,
+}: {
+  method: string;
+  checked: boolean;
+  onChange: (v: boolean) => void;
+  disabled: boolean;
+  disabledReason?: string;
+}) {
+  return (
+    <FormRow label="Significance brackets">
+      <label className={`flex items-center gap-2 text-[13px] ${disabled ? "text-text-faint" : "text-text"}`}>
+        <input
+          type="checkbox"
+          checked={checked && !disabled}
+          disabled={disabled}
+          onChange={(e) => onChange(e.target.checked)}
+        />
+        <span>
+          Show {method} brackets (
+          <span className="font-mono">*</span> /
+          <span className="font-mono"> **</span> /
+          <span className="font-mono"> ***</span>
+          {" "}at <span className="font-mono">p &lt; .05 / .01 / .001</span>)
+        </span>
+      </label>
+      {disabled && disabledReason && (
+        <div className="text-[11px] text-text-muted italic mt-1">{disabledReason}</div>
+      )}
     </FormRow>
   );
 }

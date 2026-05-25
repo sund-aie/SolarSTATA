@@ -59,6 +59,11 @@ class BarRequest(BaseModel):
     # pre-3.2 visual; the UI selector exposes sd / sem / none.
     err: Literal["none", "sd", "sem", "ci95"] = "ci95"
     ci: float = Field(0.95, ge=0.5, le=0.999)
+    # Optional posthoc_block from a prior oneway run — when present,
+    # significance brackets are drawn over pairs with p_adj < 0.05.
+    # The engine does NOT recompute pairwise statistics; it only
+    # renders what the caller hands over.
+    pairwise: dict | None = None
 
 
 class LineRequest(BaseModel):
@@ -111,7 +116,8 @@ def stats_bar(req: BarRequest, session: Session = Depends(get_session)) -> dict:
     frame = _require_frame(session, req.frame)
     try:
         fig = bar_with_ci(frame.df, req.var, group=req.group, subgroup=req.subgroup,
-                          err=req.err, ci=req.ci, value_labels=frame.value_labels)
+                          err=req.err, ci=req.ci, pairwise=req.pairwise,
+                          value_labels=frame.value_labels)
     except KeyError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     # Stata grouped-bar syntax: graph bar (mean) y, over(sub) over(group) asyvars

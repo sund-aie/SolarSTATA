@@ -66,6 +66,123 @@ def _err_suffix(err: ErrSource) -> str:
         return " ± 95% CI"
     return ""
 
+
+def _stars_tier(p_adj: float) -> str | None:
+    """Significance-star tier — publication convention.
+
+    *** = p < .001, ** = p < .01, * = p < .05. Strict inequalities;
+    p = .05 (or above) returns None (no bracket).
+    """
+    if p_adj < 0.001:
+        return "***"
+    if p_adj < 0.01:
+        return "**"
+    if p_adj < 0.05:
+        return "*"
+    return None
+
+
+def _emit_brackets(
+    raw_keys: list[str],
+    xs: list[str],
+    ys: list[float],
+    errs: list[float],
+    pairwise: dict,
+) -> tuple[list[dict], list[dict]]:
+    """Build Plotly shapes + annotations for significance brackets.
+
+    Reads the pairwise matrix produced by oneway's _pairwise (we do
+    not recompute anything). Only pairs with `p_adj < 0.05` get a
+    bracket. Brackets stack above the tallest bar/error-bar tip:
+    tightest spans drawn lowest, wider spans stacked above.
+
+    `raw_keys` are the engine's stringified group values (what the
+    pairwise comparisons key off); `xs` are the corresponding axis
+    labels (what Plotly draws). They line up index-for-index.
+    """
+    if not pairwise or not isinstance(pairwise.get("comparisons"), list):
+        return [], []
+
+    index: dict[str, int] = {name: i for i, name in enumerate(raw_keys)}
+    if len(index) < 2:
+        return [], []
+
+    # Bracket base sits above the tallest error-bar tip; step size
+    # scales with the overall y-range so brackets stay legible
+    # regardless of measurement units.
+    tops = [(ys[i] + errs[i]) for i in range(len(xs))]
+    overall_top = max(tops) if tops else 0.0
+    overall_bottom = min(min(ys), 0.0) if ys else 0.0
+    span = max(overall_top - overall_bottom, abs(overall_top), 1.0)
+    step = span * 0.08
+    base = overall_top + step * 0.6
+
+    # Collect significant pairs that both name a bar in the chart.
+    sig: list[tuple[int, int, str]] = []
+    for cmp in pairwise["comparisons"]:
+        a = cmp.get("a")
+        b = cmp.get("b")
+        p_adj = cmp.get("p_adj")
+        if a is None or b is None or p_adj is None:
+            continue
+        if a not in index or b not in index:
+            continue
+        stars = _stars_tier(float(p_adj))
+        if stars is None:
+            continue
+        i_a, i_b = index[a], index[b]
+        if i_a == i_b:
+            continue
+        if i_a > i_b:
+            i_a, i_b = i_b, i_a
+        sig.append((i_a, i_b, stars))
+
+    # Stack: tightest spans on the bottom, wider above. Tie-break by
+    # leftmost endpoint so output is deterministic.
+    sig.sort(key=lambda t: (t[1] - t[0], t[0]))
+
+    shapes: list[dict] = []
+    annotations: list[dict] = []
+    line_style = {"color": "rgba(0,0,0,0.55)", "width": 1}
+    tick_height = step * 0.30
+
+    for level, (i_a, i_b, stars) in enumerate(sig):
+        h = base + level * step
+        x_a, x_b = xs[i_a], xs[i_b]
+        # Left tick, top connector, right tick — three line shapes
+        # so we can use category names on the x-axis (paths require
+        # numeric coords).
+        shapes.append({
+            "type": "line", "xref": "x", "yref": "y",
+            "x0": x_a, "x1": x_a, "y0": h - tick_height, "y1": h,
+            "line": line_style,
+        })
+        shapes.append({
+            "type": "line", "xref": "x", "yref": "y",
+            "x0": x_a, "x1": x_b, "y0": h, "y1": h,
+            "line": line_style,
+        })
+        shapes.append({
+            "type": "line", "xref": "x", "yref": "y",
+            "x0": x_b, "x1": x_b, "y0": h - tick_height, "y1": h,
+            "line": line_style,
+        })
+        # Stars centered on the bracket midpoint. Plotly's category
+        # axis accepts fractional numeric x for interpolation between
+        # categories — that's how we land in the middle.
+        annotations.append({
+            "x": (i_a + i_b) / 2.0, "y": h + step * 0.18,
+            "xref": "x", "yref": "y",
+            "text": stars,
+            "showarrow": False,
+            "font": {"family": "Geist Mono, monospace", "size": 13,
+                     "color": "rgba(0,0,0,0.75)"},
+            "xanchor": "center",
+            "yanchor": "bottom",
+        })
+
+    return shapes, annotations
+
 ACCENT = "#D4B36A"
 ACCENT_SOFT = "rgba(212, 179, 106, 0.55)"
 INFO = "#8FA8C4"
@@ -270,6 +387,7 @@ def bar_with_ci(
     subgroup: str | None = None,
     err: ErrSource = "ci95",
     ci: float = 0.95,
+    pairwise: dict | None = None,
     value_labels: dict[str, dict] | None = None,
 ) -> dict:
     """Bar chart of mean(`var`) per group, with optional sub-grouping.
@@ -280,12 +398,20 @@ def bar_with_ci(
     `barmode='group'` so bars cluster by `group`. Both axes preserve
     data-encounter order via Plotly's `categoryorder: array`. This is
     the canonical "8 milks × 3 timepoints" figure.
+
+    `pairwise` is an optional posthoc_block (the dict shape produced by
+    oneway's _pairwise). When provided, significance brackets are
+    overlaid above the bars for any pair with `p_adj < 0.05`. Grouped
+    bars (subgroup set) skip brackets — the UI disables the toggle
+    there with an explanation; we also guard at the engine level.
     """
     if var not in df.columns:
         raise KeyError(f"variable {var!r} not in dataset")
     if subgroup and subgroup not in df.columns:
         raise KeyError(f"subgroup variable {subgroup!r} not in dataset")
     if subgroup and group and group in df.columns:
+        # pairwise dropped here on purpose — brackets aren't meaningful
+        # over a two-factor clustered layout.
         return _bar_grouped(df, var, group, subgroup, err, ci, value_labels)
     y_title = f"mean {var}{_err_suffix(err)}"
     show_err = err != "none"
@@ -306,6 +432,7 @@ def bar_with_ci(
         }
 
     labels = (value_labels or {}).get(group)
+    raw_keys: list[str] = []
     xs: list[str] = []
     ys: list[float] = []
     errs: list[float] = []
@@ -313,6 +440,10 @@ def bar_with_ci(
         s = pd.to_numeric(sub[var], errors="coerce").dropna()
         if len(s) < 1:
             continue
+        # _pairwise keys comparisons by str(group_value); keep the
+        # raw side in parallel with the labelled xs for the bracket
+        # lookup to work with value-labelled groups too.
+        raw_keys.append(str(lvl))
         xs.append(_label_for(lvl, labels))
         ys.append(float(s.mean()))
         errs.append(_half_spread(s, err=err, ci=ci))
@@ -322,6 +453,12 @@ def bar_with_ci(
     # re-sorts categorical axes alphabetically by default.
     layout["xaxis"] = {**layout["xaxis"], "type": "category", "categoryorder": "array",
                        "categoryarray": xs}
+    if pairwise:
+        shapes, annotations = _emit_brackets(raw_keys, xs, ys, errs, pairwise)
+        if shapes:
+            layout["shapes"] = shapes
+        if annotations:
+            layout["annotations"] = annotations
     return {
         "data": [{
             "type": "bar",
