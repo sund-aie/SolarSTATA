@@ -67,6 +67,51 @@ bar form has a sub-group set, the toggle is shown disabled with
 "Brackets apply to single-group comparisons." Tukey-HSD is not
 yet emitted by the engine and stays on the v3.3 list.
 
+### Brand identity + UI polish
+
+The placeholder typographic logo is replaced with the amber-sun
+mark (`#D4B36A` solid disc + 8 radiating pill beams, cardinal and
+ordinal) across every brand surface:
+
+- macOS `.icns` (`desktop/build-resources/icon.icns`) and Windows
+  `.ico` (`desktop/build-resources/icon.ico`), wired through
+  `mac.icon` / `dmg.icon` / `win.icon` in `desktop/package.json`
+  so the packaged app no longer ships with the default Electron
+  icon.
+- Browser tab favicon (`frontend/public/favicon.svg`) referenced
+  from `index.html`.
+- Topbar wordmark — inline SVG sun mark paired with the
+  `solar`*stata* wordmark (italic gold "stata"). The version chip
+  reads from `__APP_VERSION__` injected at build time by
+  `vite.config.ts` from `frontend/package.json`, shortened to
+  `v{major}.{minor}`; it cannot drift out of sync with the actual
+  package version again.
+- Splash screen (`desktop/src/static/splash.html`) — same
+  transparent mark variant, glow effect preserved via CSS
+  `drop-shadow`.
+
+The mark exists in two SVG variants under
+`desktop/build-resources/`: `icon.svg` (cocoa-tile background for
+icon contexts) and `mark.svg` (transparent for the topbar and
+splash so it adapts to dark and light themes). `build-icons.py`
+regenerates the `.icns` and `.ico` from the master SVG on demand
+via cairosvg + Pillow; the rasterized binaries are committed so
+production builds never run the rasterizer.
+
+The mode-toggle pill is also centered: the active label sits
+inside its highlight rectangle on both Guided and Pro positions
+(`flex-1` on the buttons so the two halves of the toggle render
+at exactly equal width, matching the pill's fixed 50% calc).
+
+The dark-mode `--good` and `--warn` semantic tokens are retuned
+to the exact brand spec values (`#8BB47A` and `#C97A5A`) so the
+pre-flight status strip, FormatGuide good/bad tiles, and other
+positive/caution surfaces match the brand. Light-mode token
+variants remain tuned for their contrast context.
+
+Package versions bumped to `3.2.0-a1` in both
+`frontend/package.json` and `desktop/package.json`.
+
 ## [3.1.0-a1] – 2026-05-24
 
 v3.1C cleanup pass on top of the v3.1 desktop packaging.
