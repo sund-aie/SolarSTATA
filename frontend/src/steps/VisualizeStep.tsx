@@ -261,6 +261,7 @@ function XYForm({
   const [x, setX] = useState(numerics[0]?.name ?? "");
   const [y, setY] = useState(numerics[1]?.name ?? numerics[0]?.name ?? "");
   const [group, setGroup] = useState("");
+  const [err, setErr] = useState<ErrSource>("none");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -283,10 +284,15 @@ function XYForm({
           options={[{ value: "", label: "— none —" }, ...categoricals.map((c) => ({ value: c.name, label: c.name }))]}
         />
       </FormRow>
+      {chart === "line" && (
+        <ErrorBarRow value={err} onChange={setErr} />
+      )}
       <RunButton command={command} busy={busy} disabled={!x || !y} onClick={async () => {
         setBusy(true); setError(null);
         try {
-          const r = await api.graph(chart, { x, y, group: group || null });
+          const body: Record<string, unknown> = { x, y, group: group || null };
+          if (chart === "line") body.err = err;
+          const r = await api.graph(chart, body);
           onRendered({ kind: chart, command: r.command, figure: r.figure, timestamp: Date.now() });
         } catch (e) { setError(e instanceof ApiError ? e.detail : String(e)); }
         finally { setBusy(false); }
@@ -304,6 +310,7 @@ function SingleYForm({
   // B1: sub-group support for bar charts (the canonical "8 groups × 3
   // timepoints = 24 bars" repeated-measures figure). Off by default.
   const [subgroup, setSubgroup] = useState("");
+  const [err, setErr] = useState<ErrSource>("ci95");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -339,11 +346,15 @@ function SingleYForm({
           />
         </FormRow>
       )}
+      {chart === "bar" && (
+        <ErrorBarRow value={err} onChange={setErr} />
+      )}
       <RunButton command={command} busy={busy} disabled={!varName} onClick={async () => {
         setBusy(true); setError(null);
         try {
           const body: Record<string, unknown> = { var: varName, group: group || null };
           if (chart === "bar" && subgroup) body.subgroup = subgroup;
+          if (chart === "bar") body.err = err;
           const r = await api.graph(chart, body);
           onRendered({ kind: chart, command: r.command, figure: r.figure, timestamp: Date.now() });
         } catch (e) { setError(e instanceof ApiError ? e.detail : String(e)); }
@@ -351,6 +362,29 @@ function SingleYForm({
       }} />
       {error && <div className="text-[12px] text-warn">{error}</div>}
     </div>
+  );
+}
+
+type ErrSource = "none" | "sd" | "sem" | "ci95";
+
+const ERR_OPTIONS: { value: ErrSource; label: string }[] = [
+  { value: "none", label: "— none —" },
+  { value: "sd",   label: "SD (sample standard deviation)" },
+  { value: "sem",  label: "SEM (standard error of the mean)" },
+  { value: "ci95", label: "95% CI" },
+];
+
+function ErrorBarRow({
+  value, onChange,
+}: { value: ErrSource; onChange: (v: ErrSource) => void }) {
+  return (
+    <FormRow label="Error bars">
+      <Select
+        value={value}
+        onChange={(v) => onChange(v as ErrSource)}
+        options={ERR_OPTIONS}
+      />
+    </FormRow>
   );
 }
 

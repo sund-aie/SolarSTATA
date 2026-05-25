@@ -12,19 +12,59 @@ Chart types
   histogram(df, var, *, bins=20, group=None)
   scatter(df, x, y, *, group=None)
   box(df, var, *, group=None)
-  bar_with_ci(df, var, *, group=None, ci=0.95)
-  line(df, x, y, *, group=None)
+  bar_with_ci(df, var, *, group=None, err="ci95", ci=0.95)
+  line(df, x, y, *, group=None, err="none", ci=0.95)
   residuals_vs_fitted(df, estimation)
   marginsplot(margins_result)
+
+Error-bar source control (v3.2): `err` picks between
+  "none" — no error bars (the only backward-compat option for line)
+  "sd"   — sample standard deviation
+  "sem"  — standard error of the mean (sd / sqrt(n))
+  "ci95" — half-width of the 95% confidence interval (t-based)
+The chosen indicator is appended to the y-axis label as
+"mean VHN ± SD" / "± SEM" / "± 95% CI" so the figure self-labels.
 """
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 import numpy as np
 import pandas as pd
 from scipy import stats as sp
+
+
+ErrSource = Literal["none", "sd", "sem", "ci95"]
+
+
+def _half_spread(s: pd.Series, *, err: ErrSource, ci: float) -> float:
+    """Return the half-width to use for Plotly's symmetric error_y bars.
+
+    SD: sample standard deviation. SEM: std / sqrt(n). CI95: t-based
+    half-interval at the chosen confidence level (default 0.95).
+    None or n < 2: zero.
+    """
+    if err == "none" or len(s) < 2:
+        return 0.0
+    if err == "sd":
+        return float(s.std(ddof=1))
+    if err == "sem":
+        return float(sp.sem(s))
+    # ci95 (and any future "ci99" etc.) routes through t.ppf
+    se = float(sp.sem(s))
+    return float(sp.t.ppf((1 + ci) / 2, df=max(1, len(s) - 1)) * se)
+
+
+def _err_suffix(err: ErrSource) -> str:
+    """Human-readable indicator appended to the y-axis label."""
+    if err == "sd":
+        return " ± SD"
+    if err == "sem":
+        return " ± SEM"
+    if err == "ci95":
+        return " ± 95% CI"
+    return ""
 
 ACCENT = "#D4B36A"
 ACCENT_SOFT = "rgba(212, 179, 106, 0.55)"
@@ -228,36 +268,41 @@ def bar_with_ci(
     *,
     group: str | None = None,
     subgroup: str | None = None,
+    err: ErrSource = "ci95",
     ci: float = 0.95,
     value_labels: dict[str, dict] | None = None,
 ) -> dict:
     """Bar chart of mean(`var`) per group, with optional sub-grouping.
 
-    When `subgroup` is set the chart produces one trace per subgroup
-    level, with `barmode='group'` so bars cluster by `group`. Both axes
-    preserve data-encounter order via Plotly's `categoryorder: array`.
-    This is the canonical "8 milks × 3 timepoints" figure.
+    `err` picks the error-bar source ("none" / "sd" / "sem" / "ci95");
+    `ci` is the confidence level when err == "ci95". When `subgroup` is
+    set the chart produces one trace per subgroup level with
+    `barmode='group'` so bars cluster by `group`. Both axes preserve
+    data-encounter order via Plotly's `categoryorder: array`. This is
+    the canonical "8 milks × 3 timepoints" figure.
     """
     if var not in df.columns:
         raise KeyError(f"variable {var!r} not in dataset")
     if subgroup and subgroup not in df.columns:
         raise KeyError(f"subgroup variable {subgroup!r} not in dataset")
     if subgroup and group and group in df.columns:
-        return _bar_grouped(df, var, group, subgroup, ci, value_labels)
+        return _bar_grouped(df, var, group, subgroup, err, ci, value_labels)
+    y_title = f"mean {var}{_err_suffix(err)}"
+    show_err = err != "none"
     if not group or group not in df.columns:
         s = pd.to_numeric(df[var], errors="coerce").dropna()
-        m, se = float(s.mean()), float(sp.sem(s)) if len(s) > 1 else 0.0
-        half = sp.t.ppf((1 + ci) / 2, df=max(1, len(s) - 1)) * se if len(s) > 1 else 0.0
+        m = float(s.mean()) if len(s) > 0 else 0.0
+        half = _half_spread(s, err=err, ci=ci)
         return {
             "data": [{
                 "type": "bar",
                 "x": [var],
                 "y": [m],
-                "error_y": {"type": "data", "array": [half], "visible": True,
+                "error_y": {"type": "data", "array": [half], "visible": show_err,
                             "color": INFO, "thickness": 1.5, "width": 8},
                 "marker": {"color": ACCENT},
             }],
-            "layout": _layout(f"Mean of {var} (95% CI)", "", f"mean {var}"),
+            "layout": _layout(f"Mean of {var}", "", y_title),
         }
 
     labels = (value_labels or {}).get(group)
@@ -268,14 +313,11 @@ def bar_with_ci(
         s = pd.to_numeric(sub[var], errors="coerce").dropna()
         if len(s) < 1:
             continue
-        m = float(s.mean())
-        se = float(sp.sem(s)) if len(s) > 1 else 0.0
-        half = sp.t.ppf((1 + ci) / 2, df=max(1, len(s) - 1)) * se if len(s) > 1 else 0.0
         xs.append(_label_for(lvl, labels))
-        ys.append(m)
-        errs.append(half)
+        ys.append(float(s.mean()))
+        errs.append(_half_spread(s, err=err, ci=ci))
 
-    layout = _layout(f"Mean {var} by {group} (95% CI)", group, f"mean {var}")
+    layout = _layout(f"Mean {var} by {group}", group, y_title)
     # Lock the axis to our explicit ordering — without this Plotly
     # re-sorts categorical axes alphabetically by default.
     layout["xaxis"] = {**layout["xaxis"], "type": "category", "categoryorder": "array",
@@ -285,7 +327,7 @@ def bar_with_ci(
             "type": "bar",
             "x": xs,
             "y": ys,
-            "error_y": {"type": "data", "array": errs, "visible": True,
+            "error_y": {"type": "data", "array": errs, "visible": show_err,
                         "color": INFO, "thickness": 1.5, "width": 8},
             "marker": {"color": ACCENT},
         }],
@@ -293,10 +335,11 @@ def bar_with_ci(
     }
 
 
-def _bar_grouped(df, var, group, subgroup, ci, value_labels):
+def _bar_grouped(df, var, group, subgroup, err, ci, value_labels):
     """Grouped bar: one trace per subgroup-level. X axis is grouped categories."""
     sub_labels = (value_labels or {}).get(subgroup)
     group_labels = (value_labels or {}).get(group)
+    show_err = err != "none"
 
     sub_levels: list = []
     for lvl in df[subgroup].dropna().unique():
@@ -323,23 +366,24 @@ def _bar_grouped(df, var, group, subgroup, ci, value_labels):
                 ys.append(float("nan"))
                 errs.append(0.0)
                 continue
-            m = float(cell.mean())
-            se = float(sp.sem(cell)) if len(cell) > 1 else 0.0
-            half = sp.t.ppf((1 + ci) / 2, df=max(1, len(cell) - 1)) * se if len(cell) > 1 else 0.0
             xs.append(_label_for(grp_lvl, group_labels))
-            ys.append(m)
-            errs.append(half)
+            ys.append(float(cell.mean()))
+            errs.append(_half_spread(cell, err=err, ci=ci))
         traces.append({
             "type": "bar",
             "name": _label_for(sub_lvl, sub_labels),
             "x": xs,
             "y": ys,
-            "error_y": {"type": "data", "array": errs, "visible": True,
+            "error_y": {"type": "data", "array": errs, "visible": show_err,
                         "color": "rgba(0,0,0,0.45)", "thickness": 1.2, "width": 6},
             "marker": {"color": _color_for(i)},
         })
 
-    layout = _layout(f"Mean {var} by {group} × {subgroup} (95% CI)", group, f"mean {var}")
+    layout = _layout(
+        f"Mean {var} by {group} × {subgroup}",
+        group,
+        f"mean {var}{_err_suffix(err)}",
+    )
     layout["barmode"] = "group"
     layout["xaxis"] = {**layout["xaxis"], "type": "category", "categoryorder": "array",
                        "categoryarray": [_label_for(g, group_labels) for g in group_levels]}
@@ -356,13 +400,26 @@ def line(
     y: str,
     *,
     group: str | None = None,
+    err: ErrSource = "none",
+    ci: float = 0.95,
     value_labels: dict[str, dict] | None = None,
 ) -> dict:
+    """Line chart of `y` over `x`, optionally one line per group level.
+
+    `err="none"` plots raw (x, y) pairs as today. Switching to "sd" /
+    "sem" / "ci95" aggregates: at each unique x-level (per group, if
+    grouping), we plot the mean(y) and add a symmetric error bar of
+    the chosen spread. The y-axis label gains "± SD" / "± SEM" /
+    "± 95% CI" so the figure self-labels.
+    """
     for v in (x, y):
         if v not in df.columns:
             raise KeyError(f"variable {v!r} not in dataset")
 
-    def _trace(sub: pd.DataFrame, color: str, name: str) -> dict:
+    show_err = err != "none"
+    y_title = f"{y}{_err_suffix(err)}" if show_err else y
+
+    def _raw_trace(sub: pd.DataFrame, color: str, name: str) -> dict:
         sub = sub.sort_values(x)
         return {
             "type": "scatter",
@@ -374,17 +431,48 @@ def line(
             "marker": {"color": color, "size": 5},
         }
 
+    def _aggregated_trace(sub: pd.DataFrame, color: str, name: str) -> dict:
+        sub = sub.dropna(subset=[x, y]).copy()
+        sub[x] = pd.to_numeric(sub[x], errors="coerce")
+        sub[y] = pd.to_numeric(sub[y], errors="coerce")
+        sub = sub.dropna(subset=[x, y])
+        # Aggregate at each x-level. groupby(sort=True) is fine here —
+        # we want x ordered along the axis, not by encounter order.
+        xs: list[float] = []
+        ys: list[float] = []
+        errs: list[float] = []
+        for x_val, cell in sub.groupby(x, sort=True):
+            ys_cell = cell[y]
+            if len(ys_cell) < 1:
+                continue
+            xs.append(float(x_val))
+            ys.append(float(ys_cell.mean()))
+            errs.append(_half_spread(ys_cell, err=err, ci=ci))
+        return {
+            "type": "scatter",
+            "mode": "lines+markers",
+            "x": xs,
+            "y": ys,
+            "name": name,
+            "line": {"color": color, "width": 2},
+            "marker": {"color": color, "size": 5},
+            "error_y": {"type": "data", "array": errs, "visible": True,
+                        "color": INFO, "thickness": 1.2, "width": 6},
+        }
+
+    trace_fn = _aggregated_trace if show_err else _raw_trace
+
     if group and group in df.columns:
         labels = (value_labels or {}).get(group)
         sub_df = df.dropna(subset=[x, y])
         traces = []
         for i, (lvl, sub) in enumerate(_groupby_preserve_order(sub_df, group)):
-            traces.append(_trace(sub, _color_for(i), _label_for(lvl, labels)))
-        return {"data": traces, "layout": _layout(f"{y} over {x} by {group}", x, y)}
+            traces.append(trace_fn(sub, _color_for(i), _label_for(lvl, labels)))
+        return {"data": traces, "layout": _layout(f"{y} over {x} by {group}", x, y_title)}
 
     return {
-        "data": [_trace(df.dropna(subset=[x, y]), ACCENT, y)],
-        "layout": _layout(f"{y} over {x}", x, y),
+        "data": [trace_fn(df.dropna(subset=[x, y]), ACCENT, y)],
+        "layout": _layout(f"{y} over {x}", x, y_title),
     }
 
 

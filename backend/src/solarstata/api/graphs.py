@@ -8,6 +8,8 @@ the most-recent estimation on the session.
 
 from __future__ import annotations
 
+from typing import Literal
+
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
@@ -53,6 +55,9 @@ class BarRequest(BaseModel):
     var: str = Field(..., min_length=1)
     group: str | None = None
     subgroup: str | None = None
+    # `err` picks the error-bar source. Default ci95 preserves the
+    # pre-3.2 visual; the UI selector exposes sd / sem / none.
+    err: Literal["none", "sd", "sem", "ci95"] = "ci95"
     ci: float = Field(0.95, ge=0.5, le=0.999)
 
 
@@ -61,6 +66,11 @@ class LineRequest(BaseModel):
     x: str
     y: str
     group: str | None = None
+    # Default "none" preserves the raw (x, y) trace behaviour. When
+    # the caller picks sd / sem / ci95 we aggregate per x-level and
+    # render symmetric error bars.
+    err: Literal["none", "sd", "sem", "ci95"] = "none"
+    ci: float = Field(0.95, ge=0.5, le=0.999)
 
 
 @router.post("/histogram")
@@ -101,7 +111,7 @@ def stats_bar(req: BarRequest, session: Session = Depends(get_session)) -> dict:
     frame = _require_frame(session, req.frame)
     try:
         fig = bar_with_ci(frame.df, req.var, group=req.group, subgroup=req.subgroup,
-                          ci=req.ci, value_labels=frame.value_labels)
+                          err=req.err, ci=req.ci, value_labels=frame.value_labels)
     except KeyError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     # Stata grouped-bar syntax: graph bar (mean) y, over(sub) over(group) asyvars
@@ -117,7 +127,7 @@ def stats_line(req: LineRequest, session: Session = Depends(get_session)) -> dic
     frame = _require_frame(session, req.frame)
     try:
         fig = line(frame.df, req.x, req.y, group=req.group,
-                   value_labels=frame.value_labels)
+                   err=req.err, ci=req.ci, value_labels=frame.value_labels)
     except KeyError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     return _packed(fig, command=_cmd("twoway line", f"{req.y} {req.x}", group=req.group))
