@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-label="SolarSTATA amber sun mark (transparent)">
+  <!-- Tile-less variant of icon.svg — same disc + beams, no
+       background rectangle. Used by the topbar and the splash so
+       the mark adapts to both dark and light themes instead of
+       showing a cocoa box on the chalk surface. -->
+  <g transform="translate(512 512)" fill="#D4B36A">
+    <g><rect x="240" y="-55" width="160" height="110" rx="55"/></g>
+    <g transform="rotate(45)"><rect x="240" y="-55" width="160" height="110" rx="55"/></g>
+    <g transform="rotate(90)"><rect x="240" y="-55" width="160" height="110" rx="55"/></g>
+    <g transform="rotate(135)"><rect x="240" y="-55" width="160" height="110" rx="55"/></g>
+    <g transform="rotate(180)"><rect x="240" y="-55" width="160" height="110" rx="55"/></g>
+    <g transform="rotate(225)"><rect x="240" y="-55" width="160" height="110" rx="55"/></g>
+    <g transform="rotate(270)"><rect x="240" y="-55" width="160" height="110" rx="55"/></g>
+    <g transform="rotate(315)"><rect x="240" y="-55" width="160" height="110" rx="55"/></g>
+    <circle cx="0" cy="0" r="190"/>
+  </g>
+</svg>

@@ -1,0 +1,41 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>SolarSTATA mark preview</title>
+<style>
+  html, body { background: #1E1A14; color: #F5EBD7; font-family: -apple-system, sans-serif;
+               margin: 0; padding: 40px; }
+  h1 { font-weight: 400; font-size: 22px; margin: 0 0 8px; }
+  p  { color: #968B73; font-size: 13px; margin: 0 0 32px; }
+  .row { display: flex; align-items: flex-end; gap: 48px; margin-bottom: 28px; }
+  .cell { display: flex; flex-direction: column; align-items: center; gap: 8px; }
+  .label { color: #968B73; font-family: ui-monospace, monospace; font-size: 11px; letter-spacing: 0.06em; }
+  .surface-cocoa { background: #15110D; padding: 12px; border-radius: 8px; }
+  .surface-chalk { background: #F5EBD7; padding: 12px; border-radius: 8px; }
+  img.mark { display: block; image-rendering: -webkit-optimize-contrast; }
+  hr { border: 0; border-top: 1px solid #2D2820; margin: 32px 0; }
+</style></head>
+<body>
+  <h1>amber sun · 4 sizes that matter</h1>
+  <p>16px favicon · 32px retina favicon / Windows small · 64px Dock minimum · 256px standard tile</p>
+
+  <div class="row">
+    <div class="cell"><img class="mark" src="./icon.svg" width="16"  height="16"><div class="label">16</div></div>
+    <div class="cell"><img class="mark" src="./icon.svg" width="32"  height="32"><div class="label">32</div></div>
+    <div class="cell"><img class="mark" src="./icon.svg" width="64"  height="64"><div class="label">64</div></div>
+    <div class="cell"><img class="mark" src="./icon.svg" width="128" height="128"><div class="label">128</div></div>
+    <div class="cell"><img class="mark" src="./icon.svg" width="256" height="256"><div class="label">256</div></div>
+  </div>
+
+  <hr>
+  <p>same sizes laid on the topbar's actual cocoa (background tile blends in)</p>
+  <div class="row">
+    <div class="cell"><div class="surface-cocoa"><img class="mark" src="./icon.svg" width="22"  height="22"></div><div class="label">22 · topbar</div></div>
+    <div class="cell"><div class="surface-cocoa"><img class="mark" src="./icon.svg" width="96"  height="96"></div><div class="label">96 · splash</div></div>
+  </div>
+
+  <hr>
+  <p>contrast check on the warm-light theme cocoa surface (#F4F1E9) — paler surface, mark must still pop</p>
+  <div class="row">
+    <div class="cell"><div class="surface-chalk"><img class="mark" src="./icon.svg" width="22"  height="22"></div><div class="label">22 · light topbar</div></div>
+    <div class="cell"><div class="surface-chalk"><img class="mark" src="./icon.svg" width="96"  height="96"></div><div class="label">96 · light splash</div></div>
+  </div>
+</body></html>

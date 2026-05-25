@@ -24,14 +24,11 @@
     gap: 24px;
   }
   .logo {
-    font-family: "Georgia", "Times New Roman", serif;
-    font-style: italic;
-    font-weight: 600;
-    font-size: 96px;
-    color: #d4a437;
-    line-height: 1;
-    text-shadow: 0 0 24px rgba(212, 164, 55, 0.25);
+    width: 96px;
+    height: 96px;
+    filter: drop-shadow(0 0 24px rgba(212, 164, 55, 0.25));
   }
+  .logo svg, .logo img { display: block; width: 100%; height: 100%; }
   .name {
     letter-spacing: 0.18em;
     font-size: 13px;
@@ -50,7 +47,7 @@
     text-align: center;
     white-space: pre-wrap;
   }
-  body[data-state="failed"] .logo { color: #b65548; }
+  body[data-state="failed"] .logo { filter: drop-shadow(0 0 24px rgba(201, 122, 90, 0.35)); }
   body[data-state="failed"] #msg { color: #ddc0a8; }
   .spinner {
     width: 28px;
@@ -67,7 +64,9 @@
 </style>
 </head>
 <body data-state="loading">
-  <div class="logo">S</div>
+  <!-- mark.svg is the transparent amber-sun variant — see
+       desktop/build-resources/mark.svg for the master. -->
+  <div class="logo"><img src="./mark.svg" alt="" width="96" height="96" /></div>
   <div class="name">SolarSTATA</div>
   <div class="spinner"></div>
   <div id="msg">Starting backend…</div>

@@ -24,9 +24,10 @@ describe("App shell smoke", () => {
     resetStore();
     render(<App />);
 
-    // Wordmark — italic-serif "S" then sans "olarSTATA"
-    expect(screen.getByText("olarSTATA")).toBeInTheDocument();
-    expect(screen.getByText("S")).toBeInTheDocument();
+    // Wordmark — sun mark + "solar" sans + "stata" italic gold
+    expect(screen.getByRole("img", { name: /SolarSTATA/i })).toBeInTheDocument();
+    expect(screen.getByText("stata")).toBeInTheDocument();
+    expect(screen.getByText(/^solar$/)).toBeInTheDocument();
 
     // Mode toggle accessible name
     const toggle = screen.getByRole("tablist", { name: /mode toggle/i });

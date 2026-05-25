@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-label="SolarSTATA amber sun mark">
+  <!-- Background tile. rx=120 (~12%) gives a soft round-square that
+       reads correctly when Windows uses it directly; macOS Big Sur+
+       clips to its own superellipse mask so the tile shape mostly
+       matters for the favicon and the in-app contexts where the tile
+       sits on the same cocoa as the topbar (so the corners are
+       effectively invisible there). -->
+  <rect width="1024" height="1024" rx="120" fill="#15110D"/>
+
+  <!-- All mark geometry lives in a translate-to-center group so the
+       8 beams can be authored once and rotated. The disc draws LAST
+       so the beam bases tuck cleanly behind it; the visual gap is
+       enforced by the beam inner x (240 > disc radius 190). -->
+  <g transform="translate(512 512)" fill="#D4B36A">
+    <!-- 8 radiating beams: pill rectangles from x=240 to x=400
+         (length 160), half-width 55 (full width 110), fully rounded
+         caps. Thickness picked so beams read as ~1.7px at a 16px
+         favicon and ~3.4px at 32px retina favicon — anti-aliased
+         but still distinct from the disc silhouette. -->
+    <g><rect x="240" y="-55" width="160" height="110" rx="55"/></g>
+    <g transform="rotate(45)"><rect x="240" y="-55" width="160" height="110" rx="55"/></g>
+    <g transform="rotate(90)"><rect x="240" y="-55" width="160" height="110" rx="55"/></g>
+    <g transform="rotate(135)"><rect x="240" y="-55" width="160" height="110" rx="55"/></g>
+    <g transform="rotate(180)"><rect x="240" y="-55" width="160" height="110" rx="55"/></g>
+    <g transform="rotate(225)"><rect x="240" y="-55" width="160" height="110" rx="55"/></g>
+    <g transform="rotate(270)"><rect x="240" y="-55" width="160" height="110" rx="55"/></g>
+    <g transform="rotate(315)"><rect x="240" y="-55" width="160" height="110" rx="55"/></g>
+
+    <!-- Solid sun disc. Radius 190 (~37% of canvas) — leaves clear
+         negative space between disc rim (190) and beam inner edge
+         (240), a 50-unit visual gap that survives rasterization
+         down to 32px and is still resolvable as a ring of separate
+         strokes at 16px. -->
+    <circle cx="0" cy="0" r="190"/>
+  </g>
+</svg>

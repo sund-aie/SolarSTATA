@@ -1,0 +1,51 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>SolarSTATA 3b wiring preview</title>
+<style>
+  html, body { background: #16140F; color: #ECE7DA; font-family: -apple-system, sans-serif; margin: 0; padding: 32px; }
+  .label { color: #968B73; font-family: ui-monospace, monospace; font-size: 11px; letter-spacing: 0.06em; margin-bottom: 10px; }
+  .topbar {
+    height: 56px; background: #16140F; border-bottom: 1px solid #2A2620;
+    display: flex; align-items: center; gap: 24px; padding: 0 20px; margin-bottom: 28px;
+  }
+  .wordmark { display: flex; align-items: center; gap: 8px; }
+  .wordmark img { width: 24px; height: 24px; }
+  .wordmark .text { font-size: 15px; font-weight: 500; letter-spacing: 0.04em; color: #ECE7DA; }
+  .wordmark .stata { font-style: italic; font-family: "Instrument Serif", Georgia, serif; font-size: 19px; color: #D4B36A; }
+  .chip {
+    font-family: ui-monospace, monospace; font-size: 10px; color: #5C5648;
+    border: 1px solid #2A2620; padding: 2px 6px; border-radius: 4px; margin-left: 4px;
+  }
+  .splash {
+    width: 720px; height: 480px; background: #0e0d0b; border-radius: 8px;
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 24px;
+  }
+  .splash .logo { width: 96px; height: 96px; filter: drop-shadow(0 0 24px rgba(212, 164, 55, 0.25)); }
+  .splash .name { color: #D4B36A; font-size: 13px; letter-spacing: 0.18em; text-transform: uppercase; }
+  .splash .msg { color: #b9b3a5; font-size: 13px; }
+</style></head>
+<body>
+  <div class="label">topbar — dark theme</div>
+  <div class="topbar">
+    <div class="wordmark">
+      <img src="./mark.svg" />
+      <span class="text">solar<span class="stata">stata</span></span>
+      <span class="chip">v3.2</span>
+    </div>
+  </div>
+
+  <div class="label">topbar — light surface (transparent mark adapts)</div>
+  <div class="topbar" style="background: #F4F1E9; border-bottom-color: #D6CFC0;">
+    <div class="wordmark">
+      <img src="./mark.svg" />
+      <span class="text" style="color: #1F1B14;">solar<span class="stata" style="color: #B89548;">stata</span></span>
+      <span class="chip" style="color: #8A8270; border-color: #D6CFC0;">v3.2</span>
+    </div>
+  </div>
+
+  <div class="label">splash screen — Electron boot window</div>
+  <div class="splash">
+    <div class="logo"><img src="./mark.svg" width="96" height="96" /></div>
+    <div class="name">SolarSTATA</div>
+    <div class="msg">Starting backend…</div>
+  </div>
+</body></html>

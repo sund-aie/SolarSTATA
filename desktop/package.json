@@ -1,6 +1,6 @@
 {
   "name": "solarstata-desktop",
-  "version": "3.1.0a1",
+  "version": "3.2.0-a1",
   "description": "Electron desktop shell for SolarSTATA",
   "private": true,
   "main": "build/main.js",
@@ -63,17 +63,20 @@
       "category": "public.app-category.education",
       "target": ["dmg"],
       "hardenedRuntime": false,
-      "identity": null
+      "identity": null,
+      "icon": "icon.icns"
     },
     "dmg": {
       "title": "SolarSTATA",
+      "icon": "icon.icns",
       "contents": [
         { "x": 130, "y": 220, "type": "file" },
         { "x": 410, "y": 220, "type": "link", "path": "/Applications" }
       ]
     },
     "win": {
-      "target": ["nsis"]
+      "target": ["nsis"],
+      "icon": "icon.ico"
     },
     "nsis": {
       "oneClick": false,
