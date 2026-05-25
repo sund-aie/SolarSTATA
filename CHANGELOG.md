@@ -44,6 +44,18 @@ was found. Wording for the canonical case:
 User clicks on the row table still take precedence — the
 auto-pick only flows in when the user hasn't already overridden.
 
+### Significance brackets on bar charts
+
+Bar charts now overlay significance brackets when the user has
+already run a matching oneway with a posthoc correction. The
+renderer reads the existing posthoc_block emitted by the engine
+(Bonferroni / Scheffé / Sidak — no new statistics computed) and
+draws `*` / `**` / `***` over pairs with p_adj < .05 / .01 / .001
+(strict inequalities). Brackets are single-factor only: when the
+bar form has a sub-group set, the toggle is shown disabled with
+"Brackets apply to single-group comparisons." Tukey-HSD is not
+yet emitted by the engine and stays on the v3.3 list.
+
 ## [3.1.0-a1] – 2026-05-24
 
 v3.1C cleanup pass on top of the v3.1 desktop packaging.
