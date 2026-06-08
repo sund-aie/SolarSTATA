@@ -199,15 +199,96 @@ function ChartForm({
 
   return (
     <div className="bg-surface border border-border rounded-md p-6">
-      {chart.id === "histogram" && <HistogramForm numerics={numerics} categoricals={categoricals} onRendered={onRendered} />}
-      {chart.id === "scatter" && <XYForm chart="scatter" numerics={axisEligible} categoricals={categoricals} onRendered={onRendered} />}
-      {chart.id === "box" && <SingleYForm chart="box" numerics={numerics} categoricals={categoricals} onRendered={onRendered} />}
-      {chart.id === "bar" && <SingleYForm chart="bar" numerics={numerics} categoricals={categoricals} onRendered={onRendered} />}
-      {chart.id === "line" && <XYForm chart="line" numerics={axisEligible} categoricals={categoricals} onRendered={onRendered} />}
-      {chart.id === "residuals" && <NoInputForm chart="residuals" onRendered={onRendered} />}
-      {chart.id === "marginsplot" && <NoInputForm chart="marginsplot" onRendered={onRendered} />}
+      {needsContinuous(chart.id) && numerics.length === 0 ? (
+        <NeedsContinuousEmptyState columns={columns} chart={chart} />
+      ) : (
+        <>
+          {chart.id === "histogram" && <HistogramForm numerics={numerics} categoricals={categoricals} onRendered={onRendered} />}
+          {chart.id === "scatter" && <XYForm chart="scatter" numerics={axisEligible} categoricals={categoricals} onRendered={onRendered} />}
+          {chart.id === "box" && <SingleYForm chart="box" numerics={numerics} categoricals={categoricals} onRendered={onRendered} />}
+          {chart.id === "bar" && <SingleYForm chart="bar" numerics={numerics} categoricals={categoricals} onRendered={onRendered} />}
+          {chart.id === "line" && <XYForm chart="line" numerics={axisEligible} categoricals={categoricals} onRendered={onRendered} />}
+          {chart.id === "residuals" && <NoInputForm chart="residuals" onRendered={onRendered} />}
+          {chart.id === "marginsplot" && <NoInputForm chart="marginsplot" onRendered={onRendered} />}
+        </>
+      )}
     </div>
   );
+}
+
+/* Histogram, box, and bar all plot the distribution or mean of a
+ * continuous variable. For an all-categorical dataset (e.g. a
+ * pre/post quiz of binary 0/1 columns) the legacy forms rendered
+ * an empty dropdown + dead Run button — a clear bug. */
+function needsContinuous(id: ChartKind): boolean {
+  return id === "histogram" || id === "box" || id === "bar";
+}
+
+/* Empty state surfaced when the user picks histogram/box/bar against
+ * a dataset with no numeric-kind columns. Reads the actual columns
+ * array to name what kinds ARE present, then points at the Counts
+ * chart that handles the categorical-data case. Exported for tests. */
+export function NeedsContinuousEmptyState({
+  columns,
+  chart,
+}: {
+  columns: ColumnInfo[];
+  chart: ChartDef;
+}) {
+  const present = countKindsPresent(columns);
+  const summary = humaniseList(present);
+  return (
+    <div className="space-y-3 max-w-[560px]">
+      <div className="eyebrow">Counts and proportions instead</div>
+      <h2 className="font-serif text-[22px] leading-tight text-text">
+        Your dataset has no{" "}
+        <em className="text-accent italic">continuous</em> variables.
+      </h2>
+      <p className="text-text text-[13px] leading-relaxed">
+        {chart.label} plots a measurement — a column whose values are
+        quantities like mean plaque index or blood pressure.
+        {summary && (
+          <> This dataset has {summary}, no measurements.</>
+        )}
+      </p>
+      <p className="text-text text-[13px] leading-relaxed">
+        For counts and proportions across categories, switch to the{" "}
+        <strong className="text-accent">Counts</strong> chart above.
+      </p>
+    </div>
+  );
+}
+
+const KIND_LABEL: Record<VarKind, string> = {
+  binary:      "binary",
+  categorical: "categorical",
+  numeric:     "numeric",
+  string:      "text",
+  id:          "id",
+};
+
+function countKindsPresent(columns: ColumnInfo[]): string[] {
+  const tally: Partial<Record<VarKind, number>> = {};
+  for (const c of columns) {
+    tally[c.kind] = (tally[c.kind] ?? 0) + 1;
+  }
+  // Ordered most-relevant-first so the message reads naturally.
+  // `numeric` is omitted on purpose — the empty state only shows
+  // when there are zero of them.
+  const order: VarKind[] = ["binary", "categorical", "id", "string"];
+  const parts: string[] = [];
+  for (const k of order) {
+    const n = tally[k];
+    if (n) parts.push(`${n} ${KIND_LABEL[k]}`);
+  }
+  return parts;
+}
+
+function humaniseList(items: string[]): string {
+  if (items.length === 0) return "";
+  if (items.length === 1) return items[0]!;
+  if (items.length === 2) return `${items[0]} and ${items[1]}`;
+  return items.slice(0, -1).join(", ") + ", and " + items[items.length - 1]!;
 }
 
 function HistogramForm({

@@ -5,6 +5,23 @@ moves on-disk state, changes installation behaviour, or
 otherwise needs a migration note for existing installs lands
 here.
 
+## [3.3.0-a1] – 2026-06-06
+
+### Visualize step empty state for all-categorical data
+
+Picking histogram, box, or bar on a dataset with zero numeric-kind
+columns previously rendered an empty variable dropdown, a live
+bins slider, and a dead Run button — a clear bug that left the
+user staring at a form that could not be filled in. The forms now
+detect the zero-numerics case and render an explanation instead:
+a serif headline ("Your dataset has no continuous variables.")
+followed by a sentence that reads the live `columns` array and
+names the kinds that ARE present (e.g. "This dataset has 3 binary
+and 2 categorical, no measurements"), then points the user to the
+Counts chart for the categorical-data case. Scatter and line are
+unaffected — they gate on dtype, not kind, so integer-coded
+categoricals stay usable on their axes.
+
 ## [3.2.0-a1] – 2026-05-24
 
 Part 1 of the v3.2 polish pass — import-format guidance.
