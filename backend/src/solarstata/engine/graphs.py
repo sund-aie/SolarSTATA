@@ -708,3 +708,168 @@ def marginsplot(margins_result: dict) -> dict:
         }],
         "layout": layout,
     }
+
+
+# ===================================================================
+# counts (v3.3 — categorical-data bar chart)
+# ===================================================================
+
+CountsMode = Literal["count", "percent"]
+CountsNormalize = Literal["total", "within_group", "within_x"]
+
+
+def counts(
+    df: pd.DataFrame,
+    x: str,
+    *,
+    group: str | None = None,
+    mode: CountsMode = "count",
+    normalize: CountsNormalize = "total",
+    value_labels: dict[str, dict] | None = None,
+) -> dict:
+    """Frequency bar chart of `x` (and optionally `group`).
+
+    The categorical-data counterpart to `bar_with_ci`. When `mode` is
+    "count" the y-axis is raw cell counts; when "percent" each cell is
+    divided by the chosen normalization scope and multiplied by 100.
+
+    `normalize` is consulted only when `mode == "percent"`:
+      - "total"        each cell / total N of the chart
+      - "within_group" each cell / total N of its group level
+      - "within_x"     each cell / total N of its x level
+
+    For the ungrouped case all three normalisations collapse to "total"
+    (the "within" scopes have no group dimension to slice along), so
+    the engine just falls back to that mathematically.
+
+    NaN values in `x` (and `group`, if set) are dropped — same default
+    as pandas `value_counts`.
+    """
+    if x not in df.columns:
+        raise KeyError(f"variable {x!r} not in dataset")
+    if group is not None and group not in df.columns:
+        raise KeyError(f"group variable {group!r} not in dataset")
+
+    x_labels = (value_labels or {}).get(x)
+    group_labels = (value_labels or {}).get(group) if group else None
+
+    # Drop NaN rows up front so the cells reflect what's actually
+    # plottable. Honour the same dropna behaviour as pandas
+    # `value_counts(dropna=True)` does in single-column form.
+    cols = [x] + ([group] if group else [])
+    sub = df.dropna(subset=cols).copy()
+
+    # Encounter-order preservation: walk the column once to pin the
+    # axis order, mirroring how _bar_grouped does it for bar charts.
+    x_levels = _unique_preserve_order(sub[x])
+    x_axis_labels = [_label_for(lvl, x_labels) for lvl in x_levels]
+
+    if group is None:
+        # Single-trace path. All three normalisations collapse to
+        # "total" since there's no group dimension to slice along.
+        counts_series = sub[x].value_counts(dropna=True)
+        ys: list[float] = []
+        for lvl in x_levels:
+            ys.append(float(counts_series.get(lvl, 0)))
+        n_total = float(sum(ys))
+        if mode == "percent" and n_total > 0:
+            ys = [(v / n_total) * 100.0 for v in ys]
+
+        y_title = "percent" if mode == "percent" else "count"
+        title_prefix = "Percent" if mode == "percent" else "Count"
+        layout = _layout(f"{title_prefix} of {x}", x, y_title)
+        layout["xaxis"] = {
+            **layout["xaxis"],
+            "type": "category",
+            "categoryorder": "array",
+            "categoryarray": x_axis_labels,
+        }
+        return {
+            "data": [{
+                "type": "bar",
+                "x": x_axis_labels,
+                "y": ys,
+                "marker": {"color": ACCENT},
+            }],
+            "layout": layout,
+        }
+
+    # Grouped path — one trace per group level (clustered bars).
+    group_levels = _unique_preserve_order(sub[group])
+
+    # Compute the raw cell-count grid first. cells[gi][xi] = count.
+    grid: list[list[float]] = []
+    for grp in group_levels:
+        per_group = sub.loc[sub[group] == grp, x].value_counts(dropna=True)
+        row: list[float] = []
+        for lvl in x_levels:
+            row.append(float(per_group.get(lvl, 0)))
+        grid.append(row)
+
+    if mode == "percent":
+        n_total = sum(sum(row) for row in grid)
+        if normalize == "total":
+            divisors = [[n_total or 1.0] * len(x_levels) for _ in group_levels]
+        elif normalize == "within_group":
+            divisors = []
+            for row in grid:
+                row_total = sum(row) or 1.0
+                divisors.append([row_total] * len(x_levels))
+        else:  # within_x
+            col_totals = [
+                sum(grid[gi][xi] for gi in range(len(group_levels))) or 1.0
+                for xi in range(len(x_levels))
+            ]
+            divisors = [[col_totals[xi] for xi in range(len(x_levels))]
+                        for _ in group_levels]
+        grid = [
+            [(grid[gi][xi] / divisors[gi][xi]) * 100.0 for xi in range(len(x_levels))]
+            for gi in range(len(group_levels))
+        ]
+
+    traces = []
+    for gi, grp in enumerate(group_levels):
+        traces.append({
+            "type": "bar",
+            "name": _label_for(grp, group_labels),
+            "x": x_axis_labels,
+            "y": grid[gi],
+            "marker": {"color": _color_for(gi)},
+        })
+
+    y_title = "percent" if mode == "percent" else "count"
+    title_prefix = "Percent" if mode == "percent" else "Count"
+    layout = _layout(f"{title_prefix} of {x} by {group}", x, y_title)
+    layout["barmode"] = "group"
+    layout["xaxis"] = {
+        **layout["xaxis"],
+        "type": "category",
+        "categoryorder": "array",
+        "categoryarray": x_axis_labels,
+    }
+    return {"data": traces, "layout": layout}
+
+
+def _unique_preserve_order(series: pd.Series) -> list:
+    """First-encounter unique values, NaN excluded.
+
+    pandas `Series.unique()` preserves encounter order but includes
+    NaN; we strip it here for the counts path where dropna has
+    already filtered the dataframe but we still want clean keys.
+    """
+    out: list = []
+    seen: set = set()
+    for v in series:
+        if pd.isna(v):
+            continue
+        # Hashable check — fall back to a list lookup for unhashable
+        # cell values (rare; defensive).
+        try:
+            if v in seen:
+                continue
+            seen.add(v)
+        except TypeError:
+            if v in out:
+                continue
+        out.append(v)
+    return out

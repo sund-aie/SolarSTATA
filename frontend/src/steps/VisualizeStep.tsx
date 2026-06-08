@@ -18,7 +18,7 @@ import { Tooltip } from "../components/Tooltip";
 import { Plot, type PlotlyFigure } from "../components/Plot";
 
 type ChartKind =
-  | "histogram" | "scatter" | "box" | "bar" | "line" | "residuals" | "marginsplot";
+  | "histogram" | "scatter" | "box" | "bar" | "line" | "counts" | "residuals" | "marginsplot";
 
 interface ChartDef {
   id: ChartKind;
@@ -60,6 +60,12 @@ const CHARTS: ChartDef[] = [
     what: "Connected dots in X-order. Useful for time-like or ordered variables.",
     how: "Pick X (numeric, usually ordered) and Y (numeric). Group optional.",
     example: <>X = <code className="font-mono">last_visit_months</code>, Y = <code className="font-mono">plaque_index</code>.</>,
+  },
+  {
+    id: "counts", label: "Counts", icon: "▇▅▃▅",
+    what: "Frequencies for a categorical variable — the visual counterpart to tabulate.",
+    how: "Pick a categorical X. Group by another categorical for clustered bars. Toggle Y to Percent for proportions.",
+    example: <>X = <code className="font-mono">q1_correct</code>, grouped by <code className="font-mono">treatment</code>, Y = Percent.</>,
   },
   {
     id: "residuals", label: "Residuals", icon: "ⵙ",
@@ -208,6 +214,7 @@ function ChartForm({
           {chart.id === "box" && <SingleYForm chart="box" numerics={numerics} categoricals={categoricals} onRendered={onRendered} />}
           {chart.id === "bar" && <SingleYForm chart="bar" numerics={numerics} categoricals={categoricals} onRendered={onRendered} />}
           {chart.id === "line" && <XYForm chart="line" numerics={axisEligible} categoricals={categoricals} onRendered={onRendered} />}
+          {chart.id === "counts" && <CountsForm categoricals={categoricals} onRendered={onRendered} />}
           {chart.id === "residuals" && <NoInputForm chart="residuals" onRendered={onRendered} />}
           {chart.id === "marginsplot" && <NoInputForm chart="marginsplot" onRendered={onRendered} />}
         </>
@@ -530,6 +537,129 @@ function BracketsRow({
   );
 }
 
+// =====================================================================
+// CountsForm — categorical-data bar chart (v3.3 Part B)
+// =====================================================================
+
+type CountsMode = "count" | "percent";
+type CountsNormalize = "total" | "within_group" | "within_x";
+
+const NORMALIZE_OPTIONS: { value: CountsNormalize; label: string }[] = [
+  { value: "total",        label: "Total (chart sums to 100)" },
+  { value: "within_group", label: "Within group (each group sums to 100)" },
+  { value: "within_x",     label: "Within X (each X level sums to 100)" },
+];
+
+function CountsForm({
+  categoricals, onRendered,
+}: { categoricals: ColumnInfo[]; onRendered: (r: Rendered) => void }) {
+  const [x, setX] = useState(categoricals[0]?.name ?? "");
+  const [group, setGroup] = useState("");
+  const [mode, setMode] = useState<CountsMode>("count");
+  const [normalize, setNormalize] = useState<CountsNormalize>("total");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const command = countsCommand({ x, group: group || null, mode, normalize });
+  const normalizeDisabled = mode !== "percent";
+
+  return (
+    <div className="space-y-4">
+      <FormRow label="Variable (categorical)">
+        <Select
+          value={x}
+          onChange={setX}
+          options={categoricals.map((c) => ({ value: c.name, label: c.name }))}
+        />
+      </FormRow>
+      <FormRow label="Group by (optional)">
+        <Select
+          value={group}
+          onChange={setGroup}
+          options={[
+            { value: "", label: "— none —" },
+            ...categoricals
+              .filter((c) => c.name !== x)
+              .map((c) => ({ value: c.name, label: c.name })),
+          ]}
+        />
+      </FormRow>
+      <FormRow label="Y axis">
+        <div className="flex items-center gap-4 text-[13px]">
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input
+              type="radio"
+              name="counts-mode"
+              checked={mode === "count"}
+              onChange={() => setMode("count")}
+            />
+            Count
+          </label>
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input
+              type="radio"
+              name="counts-mode"
+              checked={mode === "percent"}
+              onChange={() => setMode("percent")}
+            />
+            Percent
+          </label>
+        </div>
+      </FormRow>
+      <FormRow label="Normalize percent over">
+        <div className="space-y-1">
+          <Select
+            value={normalize}
+            onChange={(v) => setNormalize(v as CountsNormalize)}
+            options={NORMALIZE_OPTIONS}
+            disabled={normalizeDisabled}
+          />
+          <div className="text-[11px] text-text-muted italic leading-snug">
+            "Within group" answers "of each group, what fraction" — usually
+            what you want for pre/post comparisons.
+          </div>
+        </div>
+      </FormRow>
+      <RunButton command={command} busy={busy} disabled={!x} onClick={async () => {
+        setBusy(true); setError(null);
+        try {
+          const body: Record<string, unknown> = {
+            x, group: group || null, mode, normalize,
+          };
+          const r = await api.graph("counts", body);
+          onRendered({ kind: "counts", command: r.command, figure: r.figure, timestamp: Date.now() });
+        } catch (e) { setError(e instanceof ApiError ? e.detail : String(e)); }
+        finally { setBusy(false); }
+      }} />
+      {error && <div className="text-[12px] text-warn">{error}</div>}
+    </div>
+  );
+}
+
+/* Stata-shaped command preview. Suffix is omitted when the chosen
+ * normalization matches Stata's default for the current state:
+ * within_group is Stata's default for `(percent) y, over(x)`, and
+ * the ungrouped case collapses all scopes to total. Exported for
+ * tests so the wording stays pinned. */
+export function countsCommand({
+  x, group, mode, normalize,
+}: {
+  x: string;
+  group: string | null;
+  mode: CountsMode;
+  normalize: CountsNormalize;
+}): string {
+  const qualifier = `(${mode}) ${x}`;
+  const options: string[] = [];
+  if (group) options.push(`over(${group})`);
+  if (mode === "percent" && group && normalize !== "within_group") {
+    options.push(`normalize(${normalize})`);
+  }
+  return options.length
+    ? `graph bar ${qualifier}, ${options.join(" ")}`
+    : `graph bar ${qualifier}`;
+}
+
 function NoInputForm({
   chart, onRendered,
 }: { chart: "residuals" | "marginsplot"; onRendered: (r: Rendered) => void }) {
@@ -590,13 +720,21 @@ function FormRow({ label, children }: { label: string; children: React.ReactNode
 }
 
 function Select({
-  value, onChange, options,
-}: { value: string; onChange: (v: string) => void; options: { value: string; label: string }[] }) {
+  value, onChange, options, disabled = false,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  options: { value: string; label: string }[];
+  disabled?: boolean;
+}) {
   return (
     <select
       value={value}
       onChange={(e) => onChange(e.target.value)}
-      className="bg-bg border border-border rounded-sm px-3 py-2 text-[13px] font-mono text-text w-full max-w-[320px]"
+      disabled={disabled}
+      className={`bg-bg border border-border rounded-sm px-3 py-2 text-[13px] font-mono text-text w-full max-w-[320px] ${
+        disabled ? "opacity-50 cursor-not-allowed" : ""
+      }`}
     >
       {options.map((o) => (
         <option key={o.value} value={o.value}>{o.label}</option>

@@ -22,6 +22,31 @@ Counts chart for the categorical-data case. Scatter and line are
 unaffected — they gate on dtype, not kind, so integer-coded
 categoricals stay usable on their axes.
 
+### Counts chart for categorical-data frequencies
+
+A new chart type, "Counts" (`POST /api/graphs/counts`), is the
+visual counterpart to `tabulate`. The form takes a categorical X,
+an optional categorical group, and a `Count` / `Percent` Y-axis
+toggle. When percent is selected, a `Normalize percent over`
+dropdown picks the scope — `total` (chart sums to 100),
+`within_group` (each group sums to 100), or `within_x` (each X
+level sums to 100). The default is `total` regardless of grouping
+so the math never silently shifts when the user toggles the group
+dropdown; an explainer underneath the control signposts that
+`within_group` is usually what you want for pre/post comparisons
+without switching to it behind the user.
+
+The command preview reads `graph bar (count) y` or `graph bar
+(percent) y, over(x)` to match Stata's syntax for the same chart.
+The `normalize(...)` suffix is omitted only when the chosen scope
+matches Stata's default for the current state — so `percent +
+grouped + within_group` shows the bare `over(...)` form (matching
+Stata), and `total` or `within_x` append `normalize(...)`. NaN
+cells are dropped (`value_counts(dropna=True)`); value labels on
+both X and group axes are honoured; encounter order is preserved
+via `_groupby_preserve_order` so timepoints like Baseline / 5-day
+/ 10-day don't get alphabetised.
+
 ## [3.2.0-a1] – 2026-05-24
 
 Part 1 of the v3.2 polish pass — import-format guidance.

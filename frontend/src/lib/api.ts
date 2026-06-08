@@ -284,7 +284,7 @@ export const api = {
   // ===== Graphs =====
   // body accepts `subgroup` for grouped bar charts (B1 in v3.0.2).
   graph: async (
-    kind: "histogram" | "scatter" | "box" | "bar" | "line" | "residuals" | "marginsplot",
+    kind: "histogram" | "scatter" | "box" | "bar" | "line" | "counts" | "residuals" | "marginsplot",
     body: Record<string, unknown> = {},
   ): Promise<{ command: string; kind: "graph"; figure: { data: unknown[]; layout: Record<string, unknown> } }> => {
     const path = kind === "residuals"

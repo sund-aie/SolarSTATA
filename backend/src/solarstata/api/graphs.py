@@ -16,6 +16,7 @@ from pydantic import BaseModel, Field
 from ..engine import (
     bar_with_ci,
     box,
+    counts,
     histogram,
     line,
     marginsplot,
@@ -78,6 +79,17 @@ class LineRequest(BaseModel):
     ci: float = Field(0.95, ge=0.5, le=0.999)
 
 
+class CountsRequest(BaseModel):
+    frame: str = "default"
+    x: str = Field(..., min_length=1)
+    group: str | None = None
+    mode: Literal["count", "percent"] = "count"
+    # Default "total" keeps the math constant regardless of grouping;
+    # the UI signposts "within_group" as the usually-desired choice
+    # for pre/post comparisons without silently switching to it.
+    normalize: Literal["total", "within_group", "within_x"] = "total"
+
+
 @router.post("/histogram")
 def stats_histogram(req: HistogramRequest, session: Session = Depends(get_session)) -> dict:
     frame = _require_frame(session, req.frame)
@@ -137,6 +149,47 @@ def stats_line(req: LineRequest, session: Session = Depends(get_session)) -> dic
     except KeyError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     return _packed(fig, command=_cmd("twoway line", f"{req.y} {req.x}", group=req.group))
+
+
+@router.post("/counts")
+def stats_counts(req: CountsRequest, session: Session = Depends(get_session)) -> dict:
+    frame = _require_frame(session, req.frame)
+    try:
+        fig = counts(
+            frame.df, req.x,
+            group=req.group, mode=req.mode, normalize=req.normalize,
+            value_labels=frame.value_labels,
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return _packed(fig, command=_counts_command(req))
+
+
+def _counts_command(req: CountsRequest) -> str:
+    """Stata-shaped command string for the counts chart.
+
+    `graph bar (count) y` and `graph bar (percent) y` are the canonical
+    Stata syntax. The `normalize(...)` suffix is appended only when the
+    chosen scope diverges from Stata's default for the current state:
+      - count mode: no normalize involved.
+      - percent + ungrouped: all scopes collapse to total → no suffix.
+      - percent + grouped + within_group: matches Stata default → no suffix.
+      - percent + grouped + total: suffix `normalize(total)`.
+      - percent + grouped + within_x: suffix `normalize(within_x)`.
+    """
+    stub = "graph bar"
+    qualifier = f"({req.mode}) {req.x}"
+    parts = [stub, qualifier]
+    options: list[str] = []
+    if req.group:
+        options.append(f"over({req.group})")
+    if req.mode == "percent" and req.group:
+        if req.normalize != "within_group":
+            options.append(f"normalize({req.normalize})")
+    cmd = " ".join(parts)
+    if options:
+        cmd += ", " + " ".join(options)
+    return cmd
 
 
 @router.post("/residuals")

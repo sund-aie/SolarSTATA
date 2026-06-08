@@ -4,7 +4,7 @@ from .compress import CompressChange, compress
 from .descriptive import summarize
 from .diagnostics import levene, shapiro
 from .factor import Atom, Term, build_design, parse_indepvars
-from .graphs import bar_with_ci, box, histogram, line, marginsplot, residuals_vs_fitted, scatter
+from .graphs import bar_with_ci, box, counts, histogram, line, marginsplot, residuals_vs_fitted, scatter
 from .logit import logit
 from .postest import estat_ic, estat_vif, lincom, margins, predict, wald_test
 from .qualifiers import apply_if, apply_in, for_groups
@@ -28,6 +28,7 @@ __all__ = [
     "build_design",
     "compress",
     "compute_bins",
+    "counts",
     "estat_ic",
     "estat_vif",
     "for_groups",
