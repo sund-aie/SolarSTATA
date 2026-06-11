@@ -9,7 +9,6 @@ import { InspectStep } from "../steps/InspectStep";
 import { AnalyzeStep } from "../steps/AnalyzeStep";
 import { VisualizeStep } from "../steps/VisualizeStep";
 import { ExportStep } from "../steps/ExportStep";
-import { PlaceholderStep } from "../steps/PlaceholderStep";
 import { InspectPanel } from "../components/InspectPanel";
 import { ResultsCard } from "../components/ResultsCard";
 
@@ -34,14 +33,6 @@ export function GuidedMode() {
         {!dataset && step === "import" && <ImportStep />}
         {dataset && step === "import" && <ImportStep />}
         {dataset && step === "inspect" && <InspectStep />}
-        {dataset && step === "clean" && (
-          <PlaceholderStep
-            step="Clean and recode"
-            number={3}
-            phaseLandsIn={3}
-            blurb="Drop test rows, recode categories, fix impossible values."
-          />
-        )}
         {dataset && step === "analyze" && <AnalyzeStep />}
         {dataset && step === "visualize" && <VisualizeStep />}
         {dataset && step === "export" && <ExportStep />}

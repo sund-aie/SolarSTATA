@@ -40,7 +40,7 @@ export function ExportStep() {
   return (
     <div className="overflow-y-auto px-10 py-8 pb-20">
       <div className="mb-8">
-        <div className="eyebrow mb-2">Step 6 of 6</div>
+        <div className="eyebrow mb-2">Step 5 of 5</div>
         <h1 className="font-serif text-[32px] leading-[1.15] text-text tracking-[-0.01em] mb-1">
           Get your <em className="text-accent italic">work out</em>
         </h1>

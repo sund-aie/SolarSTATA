@@ -137,7 +137,7 @@ export interface TabulateResult {
 }
 
 export type Mode = "guided" | "pro";
-export type Step = "import" | "inspect" | "clean" | "analyze" | "visualize" | "export";
+export type Step = "import" | "inspect" | "analyze" | "visualize" | "export";
 
 // ===================================================================
 // Regression family

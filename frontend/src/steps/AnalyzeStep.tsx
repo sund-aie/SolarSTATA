@@ -64,7 +64,7 @@ export function AnalyzeStep() {
   return (
     <div className="overflow-y-auto px-10 py-8 pb-20">
       <div className="mb-8">
-        <div className="eyebrow mb-2">Step 4 of 6</div>
+        <div className="eyebrow mb-2">Step 3 of 5</div>
         <h1 className="font-serif text-[32px] leading-[1.15] text-text tracking-[-0.01em] mb-1">
           Run an <em className="text-accent italic">analysis</em>
         </h1>
