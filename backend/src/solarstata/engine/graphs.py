@@ -466,7 +466,9 @@ def bar_with_ci(
             "y": ys,
             "error_y": {"type": "data", "array": errs, "visible": show_err,
                         "color": INFO, "thickness": 1.5, "width": 8},
-            "marker": {"color": ACCENT},
+            # One PALETTE color per category — Plotly accepts a color
+            # array matching the bars, same cycle the grouped traces use.
+            "marker": {"color": [_color_for(i) for i in range(len(xs))]},
         }],
         "layout": layout,
     }
@@ -789,7 +791,9 @@ def counts(
                 "type": "bar",
                 "x": x_axis_labels,
                 "y": ys,
-                "marker": {"color": ACCENT},
+                # Same per-category color cycle as the single-group bar
+                # chart — categorical levels are distinct, not one series.
+                "marker": {"color": [_color_for(i) for i in range(len(x_axis_labels))]},
             }],
             "layout": layout,
         }

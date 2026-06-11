@@ -27,7 +27,7 @@ import pandas as pd
 import pytest
 from scipy import stats as sp
 
-from solarstata.engine.graphs import bar_with_ci, line
+from solarstata.engine.graphs import ACCENT, _color_for, bar_with_ci, line
 
 
 @pytest.fixture
@@ -194,6 +194,27 @@ def test_line_default_still_raw(repeated_x_df: pd.DataFrame) -> None:
     """Calling line() with no err arg must NOT aggregate — back-compat."""
     fig = line(repeated_x_df, "x", "y")
     assert len(fig["data"][0]["x"]) == 30
+
+
+# ---------------------------------------------------------------------------
+# bar — per-category marker colors
+# ---------------------------------------------------------------------------
+
+def test_bar_single_group_cycles_marker_color_per_category() -> None:
+    """Each bar of a single-group chart gets its own PALETTE color —
+    a color array parallel to the bars, not one flat accent."""
+    df = pd.DataFrame({"y": [10.0, 11.0, 12.0, 13.0], "g": ["A", "B", "C", "D"]})
+    fig = bar_with_ci(df, "y", group="g")
+    color = fig["data"][0]["marker"]["color"]
+    assert isinstance(color, list)
+    assert len(color) == 4  # one entry per group
+    assert color == [_color_for(i) for i in range(4)]
+
+
+def test_bar_no_group_keeps_solid_accent(simple_two_group_df: pd.DataFrame) -> None:
+    """The degenerate one-bar chart stays solid ACCENT — nothing to cycle."""
+    fig = bar_with_ci(simple_two_group_df, "y")
+    assert fig["data"][0]["marker"]["color"] == ACCENT
 
 
 # ---------------------------------------------------------------------------
