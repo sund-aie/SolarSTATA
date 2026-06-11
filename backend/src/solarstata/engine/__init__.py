@@ -6,6 +6,7 @@ from .descriptive import summarize
 from .diagnostics import levene, shapiro
 from .factor import Atom, Term, build_design, parse_indepvars
 from .graphs import bar_with_ci, box, counts, histogram, line, marginsplot, residuals_vs_fitted, scatter
+from .interpret import interpret
 from .logit import logit
 from .postest import estat_ic, estat_vif, lincom, margins, predict, wald_test
 from .qualifiers import apply_if, apply_in, for_groups
@@ -35,6 +36,7 @@ __all__ = [
     "estat_vif",
     "for_groups",
     "histogram",
+    "interpret",
     "levene",
     "lincom",
     "line",

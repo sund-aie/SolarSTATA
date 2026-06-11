@@ -765,7 +765,7 @@ function OnewayCard({ resp, command }: { resp: OnewayResponse & { _perLevelLabel
     : `One-way ANOVA — ${r.depvar} by ${r.groupvar}`;
   return (
     <>
-      <ResultsCard title={title}>
+      <ResultsCard title={title} interpretation={resp.interpretation}>
         <HeaderGrid rows={[
           ["N",        fmt(r.n)],
           ["Groups",   fmt(r.k)],
@@ -875,7 +875,7 @@ function AnovaTwoCard({ resp, command }: { resp: AnovaTwoResponse; command: stri
   const r = resp.result;
   return (
     <>
-      <ResultsCard title={`Two-way ANOVA — ${r.depvar} ~ ${r.factor_a} ${r.interaction ? "×" : "+"} ${r.factor_b}`}>
+      <ResultsCard title={`Two-way ANOVA — ${r.depvar} ~ ${r.factor_a} ${r.interaction ? "×" : "+"} ${r.factor_b}`} interpretation={resp.interpretation}>
         <HeaderGrid rows={[
           ["N",       fmt(r.n)],
           ["R²",      fmt(r.r_squared, 4)],
@@ -923,7 +923,7 @@ function AnovaRmCard({ resp, command }: { resp: AnovaRmResponse; command: string
   const bsSig = bs?.p != null && bs.p < 0.05;
   return (
     <>
-      <ResultsCard title={`Repeated-measures ANOVA — ${r.depvar}`}>
+      <ResultsCard title={`Repeated-measures ANOVA — ${r.depvar}`} interpretation={resp.interpretation}>
         <HeaderGrid rows={[
           ["Subjects",   fmt(r.n_subjects)],
           ["Obs",        fmt(r.n_obs)],
@@ -988,7 +988,7 @@ function ShapiroCard({ resp, command }: { resp: ShapiroResponse; command: string
   const r = resp.result;
   return (
     <>
-      <ResultsCard title={`Shapiro-Wilk — ${r.variable}${r.by ? ` by ${r.by}` : ""}`}>
+      <ResultsCard title={`Shapiro-Wilk — ${r.variable}${r.by ? ` by ${r.by}` : ""}`} interpretation={resp.interpretation}>
         <table className="w-full font-mono text-[12px]">
           <thead className="text-text-muted text-[11px] uppercase tracking-[0.04em]">
             <tr>
@@ -1027,7 +1027,7 @@ function LeveneCard({ resp, command }: { resp: LeveneResponse; command: string }
   const reject = r.p != null && r.p < 0.05;
   return (
     <>
-      <ResultsCard title={`Levene's test — ${r.depvar} by ${r.groupvar}`}>
+      <ResultsCard title={`Levene's test — ${r.depvar} by ${r.groupvar}`} interpretation={resp.interpretation}>
         <HeaderGrid rows={[
           ["W₀",       fmt(r.W, 4)],
           ["df",       `(${r.df1}, ${r.df2})`],
@@ -1071,7 +1071,7 @@ function TabstatCard({ resp, command }: { resp: TabstatResponse; command: string
   const r = resp.result;
   return (
     <>
-      <ResultsCard title={r.by ? `Summary statistics by ${r.by}` : "Summary statistics"}>
+      <ResultsCard title={r.by ? `Summary statistics by ${r.by}` : "Summary statistics"} interpretation={resp.interpretation}>
         {r.groups == null ? (
           // No `by`: simple var × stat matrix
           <table className="w-full font-mono text-[12px]">
@@ -1142,7 +1142,7 @@ function RegressionResult({ resp, command }: { resp: RegressResponse; command: s
   const h = resp.result.header;
   return (
     <>
-      <ResultsCard title={`Linear regression — ${resp.result.depvar}`}>
+      <ResultsCard title={`Linear regression — ${resp.result.depvar}`} interpretation={resp.interpretation}>
         <HeaderGrid
           rows={[
             ["N",          fmt(h.N)],
@@ -1172,7 +1172,7 @@ function LogitResult({ resp, command }: { resp: LogitResponse; command: string }
   const h = resp.result.header;
   return (
     <>
-      <ResultsCard title={`Logistic regression — ${resp.result.depvar}`}>
+      <ResultsCard title={`Logistic regression — ${resp.result.depvar}`} interpretation={resp.interpretation}>
         <HeaderGrid
           rows={[
             ["N",                fmt(h.N)],
