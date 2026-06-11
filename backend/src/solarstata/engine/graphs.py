@@ -421,24 +421,61 @@ def box(
     var: str,
     *,
     group: str | None = None,
+    pairwise: dict | None = None,
+    posthoc_viz: Literal["letters"] = "letters",
     value_labels: dict[str, dict] | None = None,
 ) -> dict:
+    """Box plot of `var`, one box per `group` level when grouping.
+
+    `pairwise` is an optional posthoc_block from a prior oneway. On a
+    grouped box plot it places a compact letter display above each box
+    (shared letter = not significantly different) — the same letters
+    the bar chart renders, read from the same comparisons. Box plots
+    are letters-only (`posthoc_viz` accepts nothing else): brackets
+    over box-and-whisker are visually unworkable. The no-group single
+    box ignores pairwise silently, same as bars.
+    """
     if var not in df.columns:
         raise KeyError(f"variable {var!r} not in dataset")
 
     if group and group in df.columns:
         labels = (value_labels or {}).get(group)
         traces = []
+        raw_keys: list[str] = []
+        xs: list[str] = []
+        tops: list[float] = []
+        lows: list[float] = []
         for i, (lvl, sub) in enumerate(_groupby_preserve_order(df, group)):
             s = pd.to_numeric(sub[var], errors="coerce").dropna()
+            label = _label_for(lvl, labels)
             traces.append({
                 "type": "box",
                 "y": s.tolist(),
-                "name": _label_for(lvl, labels),
+                "name": label,
                 "marker": {"color": _color_for(i)},
                 "boxmean": True,
             })
-        return {"data": traces, "layout": _layout(f"{var} by {group}", group, var)}
+            # Same parallel keying as bar_with_ci: raw str(level) for
+            # the CLD lookup, the displayed label for the axis.
+            raw_keys.append(str(lvl))
+            xs.append(label)
+            tops.append(float(s.max()) if len(s) else 0.0)
+            lows.append(float(s.min()) if len(s) else 0.0)
+        layout = _layout(f"{var} by {group}", group, var)
+        # Each box trace sits at its name on the category axis; lock
+        # the encounter order explicitly, like the bar chart does.
+        layout["xaxis"] = {**layout["xaxis"], "type": "category",
+                           "categoryorder": "array", "categoryarray": xs}
+        if pairwise and posthoc_viz == "letters":
+            annotations, caveat = _emit_letters(
+                raw_keys, xs, tops, pairwise,
+                bottom=min(lows) if lows else 0.0,
+            )
+            if annotations:
+                layout["annotations"] = annotations
+            if caveat:
+                layout["margin"] = {**layout["margin"], "b": 80}
+        return {"data": traces, "layout": layout}
 
     s = pd.to_numeric(df[var], errors="coerce").dropna()
     return {

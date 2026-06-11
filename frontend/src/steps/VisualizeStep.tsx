@@ -391,7 +391,8 @@ function XYForm({
   );
 }
 
-function SingleYForm({
+/* Exported for tests — the box/bar form including the posthoc rows. */
+export function SingleYForm({
   chart, numerics, categoricals, onRendered,
 }: { chart: "box" | "bar"; numerics: ColumnInfo[]; categoricals: ColumnInfo[]; onRendered: (r: Rendered) => void }) {
   const [varName, setVarName] = useState(numerics[0]?.name ?? "");
@@ -404,19 +405,20 @@ function SingleYForm({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Posthoc visualization (brackets or compact letters) — only
-  // available on single-group bar charts AND only when the user has
-  // already run a matching oneway with posthoc enabled. We render
+  // Posthoc visualization — only on single-group charts AND only when
+  // the user has already run a matching oneway with posthoc enabled.
+  // Bar offers brackets or compact letters; box is letters-only
+  // (brackets over box-and-whisker are visually unworkable). We render
   // what the engine already computed; no new statistics here.
   const analyzeRecords = useApp((s) => s.analyzeRecords);
   const matchingPosthoc: OnewayPosthocBlock | null = useMemo(
-    () => (chart === "bar" && varName && group
+    () => (varName && group
       ? lastOnewayPosthoc(analyzeRecords, varName, group)
       : null),
-    [chart, varName, group, analyzeRecords],
+    [varName, group, analyzeRecords],
   );
   const posthocDisabledByGrouping = Boolean(subgroup);
-  const posthocActive = chart === "bar" && !!matchingPosthoc
+  const posthocActive = !!matchingPosthoc
     && posthocViz !== "none" && !posthocDisabledByGrouping;
 
   const command = chart === "box"
@@ -455,26 +457,26 @@ function SingleYForm({
         <ErrorBarRow value={err} onChange={setErr} />
       )}
       {chart === "bar" && matchingPosthoc && (
-        <>
-          <BracketsRow
-            method={matchingPosthoc.method}
-            checked={posthocViz === "brackets"}
-            onChange={(v) => setPosthocViz(v ? "brackets" : "none")}
-            disabled={posthocDisabledByGrouping}
-            disabledReason={posthocDisabledByGrouping
-              ? "Brackets apply to single-group comparisons."
-              : undefined}
-          />
-          <LettersRow
-            method={matchingPosthoc.method}
-            checked={posthocViz === "letters"}
-            onChange={(v) => setPosthocViz(v ? "letters" : "none")}
-            disabled={posthocDisabledByGrouping}
-            disabledReason={posthocDisabledByGrouping
-              ? "Letters apply to single-group comparisons."
-              : undefined}
-          />
-        </>
+        <BracketsRow
+          method={matchingPosthoc.method}
+          checked={posthocViz === "brackets"}
+          onChange={(v) => setPosthocViz(v ? "brackets" : "none")}
+          disabled={posthocDisabledByGrouping}
+          disabledReason={posthocDisabledByGrouping
+            ? "Brackets apply to single-group comparisons."
+            : undefined}
+        />
+      )}
+      {matchingPosthoc && (
+        <LettersRow
+          method={matchingPosthoc.method}
+          checked={posthocViz === "letters"}
+          onChange={(v) => setPosthocViz(v ? "letters" : "none")}
+          disabled={posthocDisabledByGrouping}
+          disabledReason={posthocDisabledByGrouping
+            ? "Letters apply to single-group comparisons."
+            : undefined}
+        />
       )}
       <RunButton command={command} busy={busy} disabled={!varName} onClick={async () => {
         setBusy(true); setError(null);

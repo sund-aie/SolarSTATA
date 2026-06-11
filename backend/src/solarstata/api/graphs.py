@@ -49,6 +49,11 @@ class BoxRequest(BaseModel):
     frame: str = "default"
     var: str = Field(..., min_length=1)
     group: str | None = None
+    # Optional posthoc_block from a prior oneway run — when present on
+    # a grouped box, compact letters are placed above each box. Box is
+    # letters-only: brackets over box-and-whisker are unworkable.
+    pairwise: dict | None = None
+    posthoc_viz: Literal["letters"] = "letters"
 
 
 class BarRequest(BaseModel):
@@ -120,6 +125,7 @@ def stats_box(req: BoxRequest, session: Session = Depends(get_session)) -> dict:
     frame = _require_frame(session, req.frame)
     try:
         fig = box(frame.df, req.var, group=req.group,
+                  pairwise=req.pairwise, posthoc_viz=req.posthoc_viz,
                   value_labels=frame.value_labels)
     except KeyError as exc:
         raise HTTPException(status_code=400, detail=str(exc))

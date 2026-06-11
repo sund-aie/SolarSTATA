@@ -24,7 +24,7 @@ import pandas as pd
 import pytest
 
 from solarstata.engine.cld import SIGNIFICANCE_ALPHA, compact_letter_display
-from solarstata.engine.graphs import ACCENT, CAVEAT, CAVEAT_TEXT, bar_with_ci
+from solarstata.engine.graphs import ACCENT, CAVEAT, CAVEAT_TEXT, bar_with_ci, box
 
 
 def _cmp(a: str, b: str, p_adj: float | None) -> dict:
@@ -263,3 +263,59 @@ def test_ungrouped_and_subgrouped_bars_skip_letters(four_groups_df: pd.DataFrame
     assert ungrouped["layout"].get("annotations", []) == []
     assert ungrouped["data"][0]["marker"]["color"] == ACCENT
     assert clustered["layout"].get("annotations", []) == []
+
+
+# ---------------------------------------------------------------------------
+# Box rendering — same letters, box tops instead of bar tops
+# ---------------------------------------------------------------------------
+
+def test_box_letters_one_annotation_per_box_no_shapes(four_groups_df: pd.DataFrame) -> None:
+    fig = box(four_groups_df, "y", group="g", pairwise=_all_significant_block())
+    annotations = fig["layout"].get("annotations", [])
+    assert len(annotations) == 4
+    assert [a["text"] for a in annotations] == ["a", "b", "c", "d"]
+    assert fig["layout"].get("shapes", []) == []  # box is letters-only
+    # Identical font to the bar letters and the bracket stars.
+    for a in annotations:
+        assert a["font"] == {"family": "Geist Mono, monospace", "size": 13,
+                             "color": "rgba(0,0,0,0.75)"}
+
+
+def test_box_letters_sit_above_each_group_max(four_groups_df: pd.DataFrame) -> None:
+    fig = box(four_groups_df, "y", group="g", pairwise=_all_significant_block())
+    for annotation, trace in zip(fig["layout"]["annotations"], fig["data"]):
+        assert annotation["x"] == trace["name"]
+        assert annotation["y"] > max(trace["y"])
+
+
+def test_box_axis_is_category_typed_in_encounter_order(four_groups_df: pd.DataFrame) -> None:
+    fig = box(four_groups_df, "y", group="g", pairwise=_all_significant_block())
+    xaxis = fig["layout"]["xaxis"]
+    assert xaxis["type"] == "category"
+    assert xaxis["categoryorder"] == "array"
+    assert xaxis["categoryarray"] == [t["name"] for t in fig["data"]]
+
+
+def test_box_letters_missing_pair_emits_caveat_and_widens_margin(
+    four_groups_df: pd.DataFrame,
+) -> None:
+    block = _posthoc_block({pair: 0.001 for pair in combinations("ABCD", 2)})
+    block["comparisons"][0]["p_adj"] = None
+    fig = box(four_groups_df, "y", group="g", pairwise=block)
+    caveats = [a for a in fig["layout"]["annotations"] if a["text"] == CAVEAT_TEXT]
+    assert len(caveats) == 1
+    assert caveats[0]["xref"] == "paper" and caveats[0]["yref"] == "paper"
+    assert caveats[0]["font"]["color"] == CAVEAT
+    assert fig["layout"]["margin"]["b"] == 80
+
+
+def test_box_without_pairwise_has_no_annotations(four_groups_df: pd.DataFrame) -> None:
+    fig = box(four_groups_df, "y", group="g")
+    assert fig["layout"].get("annotations", []) == []
+    assert fig["layout"]["margin"]["b"] == 50
+
+
+def test_ungrouped_box_ignores_pairwise(four_groups_df: pd.DataFrame) -> None:
+    fig = box(four_groups_df, "y", pairwise=_all_significant_block())
+    assert fig["layout"].get("annotations", []) == []
+    assert len(fig["data"]) == 1
