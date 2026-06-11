@@ -10,6 +10,11 @@ import type { AnalyzeRecord, OnewayResponse } from "./types";
 
 export type OnewayPosthocBlock = NonNullable<OnewayResponse["result"]["posthoc_block"]>;
 
+/** How a chart renders the posthoc comparisons it was handed.
+ *  Bar charts offer all three; box plots are letters-only (brackets
+ *  over box-and-whisker are visually unworkable). */
+export type PosthocViz = "none" | "brackets" | "letters";
+
 /** Return the most recent oneway posthoc block in `records` that
  *  matches the given depvar + groupvar. Returns null when:
  *    - no oneway record exists,

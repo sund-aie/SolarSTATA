@@ -1,5 +1,6 @@
 from .anova import anova_rm, anova_two, oneway
 from .binning import compute_bins
+from .cld import compact_letter_display
 from .compress import CompressChange, compress
 from .descriptive import summarize
 from .diagnostics import levene, shapiro
@@ -27,6 +28,7 @@ __all__ = [
     "box",
     "build_design",
     "compress",
+    "compact_letter_display",
     "compute_bins",
     "counts",
     "estat_ic",

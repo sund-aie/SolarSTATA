@@ -65,6 +65,9 @@ class BarRequest(BaseModel):
     # The engine does NOT recompute pairwise statistics; it only
     # renders what the caller hands over.
     pairwise: dict | None = None
+    # How the posthoc comparisons render: brackets (default) or a
+    # compact letter display. Consulted only when pairwise is present.
+    posthoc_viz: Literal["brackets", "letters"] = "brackets"
 
 
 class LineRequest(BaseModel):
@@ -129,6 +132,7 @@ def stats_bar(req: BarRequest, session: Session = Depends(get_session)) -> dict:
     try:
         fig = bar_with_ci(frame.df, req.var, group=req.group, subgroup=req.subgroup,
                           err=req.err, ci=req.ci, pairwise=req.pairwise,
+                          posthoc_viz=req.posthoc_viz,
                           value_labels=frame.value_labels)
     except KeyError as exc:
         raise HTTPException(status_code=400, detail=str(exc))

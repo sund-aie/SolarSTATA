@@ -10,7 +10,7 @@
 import { useMemo, useState } from "react";
 import { api, ApiError } from "../lib/api";
 import type { ColumnInfo, VarKind } from "../lib/types";
-import { lastOnewayPosthoc, type OnewayPosthocBlock } from "../lib/posthoc";
+import { lastOnewayPosthoc, type OnewayPosthocBlock, type PosthocViz } from "../lib/posthoc";
 import { useApp } from "../state/store";
 import { CommandPreview } from "../components/CommandPreview";
 import { ResultsCard } from "../components/ResultsCard";
@@ -400,14 +400,14 @@ function SingleYForm({
   // timepoints = 24 bars" repeated-measures figure). Off by default.
   const [subgroup, setSubgroup] = useState("");
   const [err, setErr] = useState<ErrSource>("ci95");
-  const [showBrackets, setShowBrackets] = useState(false);
+  const [posthocViz, setPosthocViz] = useState<PosthocViz>("none");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Significance brackets — only available on single-group bar
-  // charts AND only when the user has already run a matching oneway
-  // with posthoc enabled. We render what the engine already
-  // computed; no new statistics here.
+  // Posthoc visualization (brackets or compact letters) — only
+  // available on single-group bar charts AND only when the user has
+  // already run a matching oneway with posthoc enabled. We render
+  // what the engine already computed; no new statistics here.
   const analyzeRecords = useApp((s) => s.analyzeRecords);
   const matchingPosthoc: OnewayPosthocBlock | null = useMemo(
     () => (chart === "bar" && varName && group
@@ -415,8 +415,9 @@ function SingleYForm({
       : null),
     [chart, varName, group, analyzeRecords],
   );
-  const bracketsDisabledByGrouping = Boolean(subgroup);
-  const bracketsActive = chart === "bar" && !!matchingPosthoc && showBrackets && !bracketsDisabledByGrouping;
+  const posthocDisabledByGrouping = Boolean(subgroup);
+  const posthocActive = chart === "bar" && !!matchingPosthoc
+    && posthocViz !== "none" && !posthocDisabledByGrouping;
 
   const command = chart === "box"
     ? `graph box ${varName}${group ? `, over(${group})` : ""}`
@@ -454,15 +455,26 @@ function SingleYForm({
         <ErrorBarRow value={err} onChange={setErr} />
       )}
       {chart === "bar" && matchingPosthoc && (
-        <BracketsRow
-          method={matchingPosthoc.method}
-          checked={showBrackets}
-          onChange={setShowBrackets}
-          disabled={bracketsDisabledByGrouping}
-          disabledReason={bracketsDisabledByGrouping
-            ? "Brackets apply to single-group comparisons."
-            : undefined}
-        />
+        <>
+          <BracketsRow
+            method={matchingPosthoc.method}
+            checked={posthocViz === "brackets"}
+            onChange={(v) => setPosthocViz(v ? "brackets" : "none")}
+            disabled={posthocDisabledByGrouping}
+            disabledReason={posthocDisabledByGrouping
+              ? "Brackets apply to single-group comparisons."
+              : undefined}
+          />
+          <LettersRow
+            method={matchingPosthoc.method}
+            checked={posthocViz === "letters"}
+            onChange={(v) => setPosthocViz(v ? "letters" : "none")}
+            disabled={posthocDisabledByGrouping}
+            disabledReason={posthocDisabledByGrouping
+              ? "Letters apply to single-group comparisons."
+              : undefined}
+          />
+        </>
       )}
       <RunButton command={command} busy={busy} disabled={!varName} onClick={async () => {
         setBusy(true); setError(null);
@@ -470,7 +482,10 @@ function SingleYForm({
           const body: Record<string, unknown> = { var: varName, group: group || null };
           if (chart === "bar" && subgroup) body.subgroup = subgroup;
           if (chart === "bar") body.err = err;
-          if (bracketsActive && matchingPosthoc) body.pairwise = matchingPosthoc;
+          if (posthocActive && matchingPosthoc) {
+            body.pairwise = matchingPosthoc;
+            body.posthoc_viz = posthocViz;
+          }
           const r = await api.graph(chart, body);
           onRendered({ kind: chart, command: r.command, figure: r.figure, timestamp: Date.now() });
         } catch (e) { setError(e instanceof ApiError ? e.detail : String(e)); }
@@ -528,6 +543,40 @@ function BracketsRow({
           <span className="font-mono"> **</span> /
           <span className="font-mono"> ***</span>
           {" "}at <span className="font-mono">p &lt; .05 / .01 / .001</span>)
+        </span>
+      </label>
+      {disabled && disabledReason && (
+        <div className="text-[11px] text-text-muted italic mt-1">{disabledReason}</div>
+      )}
+    </FormRow>
+  );
+}
+
+/* Compact-letter toggle — the letters counterpart to BracketsRow.
+ * Bar forms show both (mutually exclusive via the PosthocViz state);
+ * the box form shows only this one. Exported for tests. */
+export function LettersRow({
+  method, checked, onChange, disabled, disabledReason,
+}: {
+  method: string;
+  checked: boolean;
+  onChange: (v: boolean) => void;
+  disabled: boolean;
+  disabledReason?: string;
+}) {
+  return (
+    <FormRow label="Compact letters">
+      <label className={`flex items-center gap-2 text-[13px] ${disabled ? "text-text-faint" : "text-text"}`}>
+        <input
+          type="checkbox"
+          checked={checked && !disabled}
+          disabled={disabled}
+          onChange={(e) => onChange(e.target.checked)}
+        />
+        <span>
+          Show {method} letters (groups sharing a letter are{" "}
+          <span className="font-mono">not</span> significantly different
+          {" "}at <span className="font-mono">p &lt; .05</span>)
         </span>
       </label>
       {disabled && disabledReason && (
