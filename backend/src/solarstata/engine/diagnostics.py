@@ -134,14 +134,17 @@ def levene(
 
     for g in groups:
         sub = pd.to_numeric(df.loc[df[groupvar] == g, depvar], errors="coerce").dropna()
-        if len(sub) < 2:
+        # Singleton groups stay in the test — Stata's robvar includes them
+        # (their |x − center| term is 0 but they still count toward k and the
+        # between-group term). Only groups with no observations are excluded.
+        if sub.empty:
             continue
         samples.append(sub.to_numpy())
         group_rows.append({
             "group": str(g),
             "n": int(len(sub)),
             "mean": _safe(sub.mean()),
-            "sd": _safe(sub.std(ddof=1)),
+            "sd": _safe(sub.std(ddof=1)) if len(sub) > 1 else None,
         })
 
     if len(samples) < 2:
