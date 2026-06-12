@@ -456,6 +456,17 @@ export function SingleYForm({
       {chart === "bar" && (
         <ErrorBarRow value={err} onChange={setErr} />
       )}
+      {!matchingPosthoc && varName && group && (
+        <FormRow label="Post-hoc display">
+          <div className="text-[12px] text-text-muted italic leading-snug max-w-[420px]">
+            {chart === "bar" ? "Significance brackets and compact letters" : "Compact letters"}{" "}
+            appear here after you run a one-way ANOVA on{" "}
+            <span className="font-mono not-italic">{varName}</span> by{" "}
+            <span className="font-mono not-italic">{group}</span> with a post-hoc
+            correction in the Analyze step.
+          </div>
+        </FormRow>
+      )}
       {chart === "bar" && matchingPosthoc && (
         <BracketsRow
           method={matchingPosthoc.method}

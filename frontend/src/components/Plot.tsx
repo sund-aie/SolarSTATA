@@ -19,6 +19,43 @@ export interface PlotlyFigure {
   layout: Record<string, unknown>;
 }
 
+/* Backend figures draw their overlay ink — significance-bracket lines,
+ * star annotations, compact-letter labels (engine/graphs.py
+ * _emit_brackets/_emit_letters) — in light-mode ink. Theming is this
+ * wrapper's job, so the known ink colors are remapped to warm cream
+ * for dark mode here. Any other annotation/shape color (e.g. the warm
+ * CAVEAT tone under a letters chart) passes through untouched.
+ * Exported for tests. */
+const DARK_INK: Record<string, string> = {
+  "rgba(0,0,0,0.75)": "rgba(236,231,218,0.85)",  // letter/star annotation font
+  "rgba(0,0,0,0.55)": "rgba(236,231,218,0.60)",  // bracket line shapes
+};
+
+export function themeOverlayInk(
+  layout: Record<string, unknown>,
+  isLight: boolean,
+): Record<string, unknown> {
+  if (isLight) return {};
+  const out: Record<string, unknown> = {};
+  const annotations = layout.annotations as
+    | { font?: { color?: string } }[]
+    | undefined;
+  if (Array.isArray(annotations)) {
+    out.annotations = annotations.map((a) => {
+      const mapped = a?.font?.color ? DARK_INK[a.font.color] : undefined;
+      return mapped ? { ...a, font: { ...a.font, color: mapped } } : a;
+    });
+  }
+  const shapes = layout.shapes as { line?: { color?: string } }[] | undefined;
+  if (Array.isArray(shapes)) {
+    out.shapes = shapes.map((s) => {
+      const mapped = s?.line?.color ? DARK_INK[s.line.color] : undefined;
+      return mapped ? { ...s, line: { ...s.line, color: mapped } } : s;
+    });
+  }
+  return out;
+}
+
 interface Props {
   figure: PlotlyFigure;
   height?: number;
@@ -53,6 +90,7 @@ export function Plot({ figure, height = 360, className = "" }: Props) {
         tickfont: { color: isLight ? "#4A4537" : "#968E7D" },
       },
       legend: { bgcolor: "rgba(0,0,0,0)", font: { color: isLight ? "#1F1B14" : "#ECE7DA" } },
+      ...themeOverlayInk(figure.layout, isLight),
     };
   }, [theme, figure.layout]);
 

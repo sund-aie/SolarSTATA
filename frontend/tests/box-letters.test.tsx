@@ -100,6 +100,42 @@ describe("box form compact letters", () => {
     expect(screen.queryByText("Compact letters")).not.toBeInTheDocument();
   });
 
+  it("explains the missing precondition instead of hiding the rows silently", () => {
+    render(
+      <SingleYForm chart="box" numerics={NUMERICS} categoricals={CATEGORICALS}
+                   onRendered={() => {}} />,
+    );
+    expect(screen.getByText("Post-hoc display")).toBeInTheDocument();
+    expect(
+      screen.getByText(/appear here after you run a one-way ANOVA/),
+    ).toBeInTheDocument();
+    // The hint names the live variable pair (scoped to its spans — the
+    // same names also exist as <option> entries in the dropdowns).
+    expect(screen.getByText("plaque_index", { selector: "span" })).toBeInTheDocument();
+    expect(screen.getByText("education_level", { selector: "span" })).toBeInTheDocument();
+  });
+
+  it("hint names brackets too on the bar form and disappears once a posthoc matches", () => {
+    const { rerender } = render(
+      <SingleYForm chart="bar" numerics={NUMERICS} categoricals={CATEGORICALS}
+                   onRendered={() => {}} />,
+    );
+    expect(
+      screen.getByText(/Significance brackets and compact letters/),
+    ).toBeInTheDocument();
+    useApp.setState({
+      analyzeRecords: [onewayRecord("plaque_index", "education_level")],
+    });
+    rerender(
+      <SingleYForm chart="bar" numerics={NUMERICS} categoricals={CATEGORICALS}
+                   onRendered={() => {}} />,
+    );
+    expect(
+      screen.queryByText(/appear here after you run a one-way ANOVA/),
+    ).not.toBeInTheDocument();
+    expect(screen.getByText("Compact letters")).toBeInTheDocument();
+  });
+
   it("bar form still offers both brackets and letters", () => {
     useApp.setState({
       analyzeRecords: [onewayRecord("plaque_index", "education_level")],
