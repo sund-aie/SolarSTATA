@@ -1,4 +1,4 @@
-/* Left rail: 6 wizard steps + contextual help card.
+/* Left rail: 5 wizard steps + contextual help card.
  *
  * - Active step: 2px gold left bar + filled gold step-num circle.
  * - Done steps: green-tinted check in step-num.
@@ -10,7 +10,6 @@ import type { Step } from "../lib/types";
 const STEPS: { id: Step; name: string }[] = [
   { id: "import",    name: "Import" },
   { id: "inspect",   name: "Inspect" },
-  { id: "clean",     name: "Clean" },
   { id: "analyze",   name: "Analyze" },
   { id: "visualize", name: "Visualize" },
   { id: "export",    name: "Export" },
@@ -35,21 +34,33 @@ const HELP_BY_STEP: Record<Step, { title: string; body: React.ReactNode }> = {
       </>
     ),
   },
-  clean: {
-    title: "Clean and recode",
-    body: <>Drop test rows, recode categories, generate new variables. Phase 3.</>,
-  },
   analyze: {
     title: "Run analyses",
-    body: <>Descriptives, t-tests, ANOVA, regression. Phase 3.</>,
+    body: (
+      <>
+        Descriptives, ANOVA with post-hoc pairs, regression, logit — every result
+        shows its Stata command and the numbers behind it.
+      </>
+    ),
   },
   visualize: {
     title: "Plot it",
-    body: <>Histograms, scatterplots, residuals. Phase 5.</>,
+    body: (
+      <>
+        Histograms, scatter, box, bar with error bars, counts, and model
+        diagnostics. Significance brackets and letters read your post-hoc runs.
+      </>
+    ),
   },
   export: {
     title: "Export results",
-    body: <>PDF, HTML, Word, or save the dataset back out. Phase 5.</>,
+    body: (
+      <>
+        Save the dataset back out (<code className="font-mono">.csv</code> /{" "}
+        <code className="font-mono">.dta</code> / Excel / Parquet), download your
+        session as a do-file, or render a PDF/HTML report.
+      </>
+    ),
   },
 };
 

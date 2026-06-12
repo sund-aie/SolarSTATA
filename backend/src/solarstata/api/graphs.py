@@ -49,6 +49,11 @@ class BoxRequest(BaseModel):
     frame: str = "default"
     var: str = Field(..., min_length=1)
     group: str | None = None
+    # Optional posthoc_block from a prior oneway run — when present on
+    # a grouped box, compact letters are placed above each box. Box is
+    # letters-only: brackets over box-and-whisker are unworkable.
+    pairwise: dict | None = None
+    posthoc_viz: Literal["letters"] = "letters"
 
 
 class BarRequest(BaseModel):
@@ -65,6 +70,9 @@ class BarRequest(BaseModel):
     # The engine does NOT recompute pairwise statistics; it only
     # renders what the caller hands over.
     pairwise: dict | None = None
+    # How the posthoc comparisons render: brackets (default) or a
+    # compact letter display. Consulted only when pairwise is present.
+    posthoc_viz: Literal["brackets", "letters"] = "brackets"
 
 
 class LineRequest(BaseModel):
@@ -117,6 +125,7 @@ def stats_box(req: BoxRequest, session: Session = Depends(get_session)) -> dict:
     frame = _require_frame(session, req.frame)
     try:
         fig = box(frame.df, req.var, group=req.group,
+                  pairwise=req.pairwise, posthoc_viz=req.posthoc_viz,
                   value_labels=frame.value_labels)
     except KeyError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
@@ -129,6 +138,7 @@ def stats_bar(req: BarRequest, session: Session = Depends(get_session)) -> dict:
     try:
         fig = bar_with_ci(frame.df, req.var, group=req.group, subgroup=req.subgroup,
                           err=req.err, ci=req.ci, pairwise=req.pairwise,
+                          posthoc_viz=req.posthoc_viz,
                           value_labels=frame.value_labels)
     except KeyError as exc:
         raise HTTPException(status_code=400, detail=str(exc))

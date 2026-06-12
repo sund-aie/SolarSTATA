@@ -19,6 +19,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+from .interpret import interpret
+
 
 @dataclass
 class Result:
@@ -29,13 +31,20 @@ class Result:
     e_update: dict[str, Any] | None = None
 
     def to_response(self) -> dict[str, Any]:
-        """Serialize for the HTTP API."""
+        """Serialize for the HTTP API.
+
+        `interpretation` is additive (v3.3): plain-English sentences
+        rendered from the structured payload by engine.interpret.
+        Kinds without an interpreter get an empty list and the
+        frontend renders nothing.
+        """
         return {
             "command": self.command,
             "result": self.structured,
             "text": self.text,
             "r_set": self.r_update,
             "e_set": self.e_update,
+            "interpretation": interpret(str(self.structured.get("kind", "")), self.structured),
         }
 
 

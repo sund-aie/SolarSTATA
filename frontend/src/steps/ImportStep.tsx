@@ -112,7 +112,7 @@ export function ImportStep() {
   return (
     <div className="step-pane overflow-y-auto px-10 py-8 pb-20">
       <div className="mb-8">
-        <div className="eyebrow mb-2">Step 1 of 6</div>
+        <div className="eyebrow mb-2">Step 1 of 5</div>
         <h1 className="font-serif text-[32px] leading-[1.15] text-text tracking-[-0.01em] mb-1">
           Bring in your <em className="text-accent italic">dataset</em>
         </h1>

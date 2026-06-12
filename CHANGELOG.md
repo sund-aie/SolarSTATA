@@ -7,6 +7,89 @@ here.
 
 ## [3.3.0-a1] – 2026-06-06
 
+### Levene singleton-group accuracy fix
+
+`robvar` (Levene's test) silently dropped any group with fewer
+than two observations from the test sample, so the reported W and
+p described a different grouping than the one the user asked for —
+on the bundled clinic dataset, `plaque_index` by
+`education_level` (which has a singleton `unknown` level) reported
+W0 = 0.3463 / p = 0.7919 over four groups instead of the correct
+W0 = 0.4483 / p = 0.7736 over five. Both scipy and Stata's robvar
+include singleton groups (their |x − center| term is 0 but they
+count toward k and the between-group term). Only groups with zero
+usable observations are excluded now; a singleton's sd renders as
+`.` rather than a fabricated value. The engine output on the
+bundled dataset now matches `scipy.stats.levene` exactly, with a
+regression test pinning the parity.
+
+### Per-category bar colors
+
+Single-group bar charts (and the ungrouped Counts chart) used to
+paint every bar the same accent gold, wasting the encoding channel
+that grouped bars, box, and scatter already use. Each category bar
+now takes its own PALETTE color via the same `_color_for(i)` cycle
+— gold first, then info/good/warn shades. The degenerate
+no-group single bar stays solid accent: one bar, nothing to cycle.
+
+### Compact letter display on bar charts
+
+Single-group bar charts can now render a compact letter display
+(a / b / ab) above the bars as an alternative to significance
+brackets, reading the same oneway posthoc comparisons the brackets
+already consume — no new statistics. Groups sharing a letter are
+not significantly different at strict p < .05 (the bracket alpha).
+The letters come from the insert-and-absorb algorithm
+(`engine/cld.py`), assigned deterministically so the leftmost
+group always reads "a…". A pair whose adjusted p could not be
+computed is treated as not significantly different and surfaces an
+under-plot caveat (and a widened bottom margin) instead of a
+silently invented result. The bar form offers Brackets and Letters
+as mutually exclusive toggles; grouped/clustered bars disable both
+with the single-factor explanation.
+
+### Compact letters above box plots
+
+The same letter display extends to grouped box plots — letters
+sit just above each box's upper extent, in the identical mono
+font as the bracket stars, reading the same posthoc payload. Box
+is letters-only: brackets over box-and-whisker are visually
+unworkable, so the box form shows just the Letters toggle when a
+matching oneway posthoc exists. The box x-axis is now explicitly
+category-typed with encounter-order pinning, matching the bars.
+
+### Dead Clean step removed
+
+The wizard advertised a "Clean and recode" step that was a pure
+placeholder ("Lands in Phase 3") — a broken promise in the nav.
+The wizard is now five steps: Import, Inspect, Analyze, Visualize,
+Export, with every step header renumbered ("Step N of 5") and the
+left-rail help copy for Analyze / Visualize / Export rewritten to
+describe what those steps actually do today instead of promising a
+future phase. The clean-and-recode walkthrough entry remains in
+the Help panel's catalog as an explicitly deferred item — that is
+the honest place for it.
+
+### Plain-language interpretation of results
+
+Every analysis the app runs now explains itself in accurate plain
+English. A new rendering layer (`engine/interpret.py`) turns the
+result payloads the engine already produces into sentences — one
+pure function per result kind (oneway with posthoc pairs, two-way
+ANOVA, repeated-measures ANOVA, regression, logit, Shapiro-Wilk,
+Levene, tabstat), dispatched uniformly through
+`Result.to_response()` as an additive `interpretation` field on
+every stats endpoint. Direction always comes from the sign of the
+payload's own difference or coefficient with the actual group
+names; significance language is strict p < .05 with the shared
+p-format ("p < .001" below .001, otherwise two decimals);
+non-significant results read "did not differ significantly",
+never "equal"; observational results are phrased associationally,
+never causally; not-computable values say so rather than invent a
+result. The Guided result cards render the sentences as a styled
+"Interpretation" block beneath each table, and render nothing at
+all when the field is empty.
+
 ### Visualize step empty state for all-categorical data
 
 Picking histogram, box, or bar on a dataset with zero numeric-kind

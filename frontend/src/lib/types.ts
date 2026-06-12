@@ -112,6 +112,7 @@ export interface SummarizeResult {
   command: string;
   result: { variables: SummarizeRow[]; detail: boolean };
   text: string;
+  interpretation?: string[];
   r_set: Record<string, number | null>;
   e_set: Record<string, unknown> | null;
 }
@@ -132,12 +133,13 @@ export interface TabulateResult {
     rows: TabulateRow[];
   };
   text: string;
+  interpretation?: string[];
   r_set: Record<string, number | null>;
   e_set: Record<string, unknown> | null;
 }
 
 export type Mode = "guided" | "pro";
-export type Step = "import" | "inspect" | "clean" | "analyze" | "visualize" | "export";
+export type Step = "import" | "inspect" | "analyze" | "visualize" | "export";
 
 // ===================================================================
 // Regression family
@@ -195,6 +197,7 @@ export interface RegressResponse {
     design_columns: string[];
   };
   text: string;
+  interpretation?: string[];
   r_set: Record<string, unknown>;
   e_set: Record<string, unknown> | null;
 }
@@ -211,6 +214,7 @@ export interface LogitResponse {
     design_columns: string[];
   };
   text: string;
+  interpretation?: string[];
   r_set: Record<string, unknown>;
   e_set: Record<string, unknown> | null;
 }
@@ -240,6 +244,7 @@ export interface MarginsResponse {
     for_command: "regress" | "logit";
   };
   text: string;
+  interpretation?: string[];
   r_set: Record<string, unknown>;
   e_set: Record<string, unknown> | null;
 }
@@ -254,6 +259,7 @@ export interface PredictResponse {
     n_filled: number;
   };
   text: string;
+  interpretation?: string[];
   r_set: Record<string, unknown>;
   e_set: Record<string, unknown> | null;
 }
@@ -270,6 +276,7 @@ export interface TestResponse {
     df_denom: number | null;
   };
   text: string;
+  interpretation?: string[];
   r_set: Record<string, unknown>;
   e_set: Record<string, unknown> | null;
 }
@@ -342,6 +349,7 @@ export interface OnewayResponse {
     } | null;
   };
   text: string;
+  interpretation?: string[];
   r_set: Record<string, unknown>;
   e_set: Record<string, unknown> | null;
 }
@@ -369,6 +377,7 @@ export interface AnovaTwoResponse {
     n: number;
   };
   text: string;
+  interpretation?: string[];
   r_set: Record<string, unknown>;
   e_set: Record<string, unknown> | null;
 }
@@ -405,6 +414,7 @@ export interface AnovaRmResponse {
     n_obs: number;
   };
   text: string;
+  interpretation?: string[];
   r_set: Record<string, unknown>;
   e_set: Record<string, unknown> | null;
 }
@@ -430,6 +440,7 @@ export interface ShapiroResponse {
     rows: ShapiroRow[];
   };
   text: string;
+  interpretation?: string[];
   r_set: Record<string, unknown>;
   e_set: Record<string, unknown> | null;
 }
@@ -455,6 +466,7 @@ export interface LeveneResponse {
     p: number | null;
   };
   text: string;
+  interpretation?: string[];
   r_set: Record<string, unknown>;
   e_set: Record<string, unknown> | null;
 }
@@ -476,6 +488,7 @@ export interface TabstatResponse {
       | Record<string, Record<string, Record<string, number | null>>>;
   };
   text: string;
+  interpretation?: string[];
   r_set: Record<string, unknown>;
   e_set: Record<string, unknown> | null;
 }

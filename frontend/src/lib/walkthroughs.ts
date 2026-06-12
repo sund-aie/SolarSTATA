@@ -6,7 +6,7 @@
 
 export type StepAction =
   | { kind: "load_clinic" }
-  | { kind: "go_step"; step: "import" | "inspect" | "clean" | "analyze" | "visualize" | "export" }
+  | { kind: "go_step"; step: "import" | "inspect" | "analyze" | "visualize" | "export" }
   | { kind: "select_var"; name: string }
   | null;
 

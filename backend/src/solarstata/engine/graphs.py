@@ -34,8 +34,11 @@ import numpy as np
 import pandas as pd
 from scipy import stats as sp
 
+from .cld import compact_letter_display
+
 
 ErrSource = Literal["none", "sd", "sem", "ci95"]
+PosthocViz = Literal["brackets", "letters"]
 
 
 def _half_spread(s: pd.Series, *, err: ErrSource, ci: float) -> float:
@@ -183,11 +186,86 @@ def _emit_brackets(
 
     return shapes, annotations
 
+
+CAVEAT_TEXT = (
+    "Some pairwise comparisons could not be computed; "
+    "letters treat affected pairs as not significantly different."
+)
+
+
+def _emit_letters(
+    raw_keys: list[str],
+    xs: list[str],
+    tops: list[float],
+    pairwise: dict,
+    *,
+    bottom: float = 0.0,
+) -> tuple[list[dict], bool]:
+    """Build Plotly annotations for a compact letter display.
+
+    Reads the pairwise comparisons produced by oneway's _pairwise (no
+    recomputation; same source as the brackets). Groups sharing a
+    letter are not significantly different at strict p < .05.
+
+    `tops` is the per-category y each letter sits above — bar + error
+    tip for bar charts, the group's data max for box plots — parallel
+    index-for-index with raw_keys/xs. `bottom` is the caller's lowest
+    plotted value so the offset step scales with the visible y-span,
+    mirroring the step math in _emit_brackets.
+
+    Returns (annotations, caveat_emitted). When any charted pair's
+    p_adj could not be computed, an under-plot caveat in paper coords
+    is appended and the caller widens the bottom margin to fit it.
+    """
+    if not pairwise or not isinstance(pairwise.get("comparisons"), list):
+        return [], False
+    if len(raw_keys) < 2:
+        return [], False
+
+    letters, n_missing = compact_letter_display(raw_keys, pairwise["comparisons"])
+
+    overall_top = max(tops) if tops else 0.0
+    overall_bottom = min(bottom, 0.0)
+    span = max(overall_top - overall_bottom, abs(overall_top), 1.0)
+    step = span * 0.08
+
+    annotations: list[dict] = []
+    for i, key in enumerate(raw_keys):
+        text = letters.get(key, "")
+        if not text:
+            continue
+        annotations.append({
+            "x": xs[i], "y": tops[i] + step * 0.35,
+            "xref": "x", "yref": "y",
+            "text": text,
+            "showarrow": False,
+            "font": {"family": "Geist Mono, monospace", "size": 13,
+                     "color": "rgba(0,0,0,0.75)"},
+            "xanchor": "center",
+            "yanchor": "bottom",
+        })
+
+    caveat = n_missing > 0
+    if caveat:
+        annotations.append({
+            "x": 0.0, "y": -0.22,
+            "xref": "paper", "yref": "paper",
+            "text": CAVEAT_TEXT,
+            "showarrow": False,
+            "font": {"family": "Geist, sans-serif", "size": 11, "color": CAVEAT},
+            "xanchor": "left",
+            "yanchor": "top",
+        })
+    return annotations, caveat
+
+
 ACCENT = "#D4B36A"
 ACCENT_SOFT = "rgba(212, 179, 106, 0.55)"
 INFO = "#8FA8C4"
 GOOD = "#8FAA88"
 WARN = "#D89B7E"
+# Under-plot caveat notes (e.g. "letters treat affected pairs as…").
+CAVEAT = WARN
 
 # Color cycle for grouped plots — gold first, then info/good/warn shades.
 PALETTE = [ACCENT, INFO, GOOD, WARN, "#B4A0D2", "#8FAA88", "#D89B7E"]
@@ -343,24 +421,61 @@ def box(
     var: str,
     *,
     group: str | None = None,
+    pairwise: dict | None = None,
+    posthoc_viz: Literal["letters"] = "letters",
     value_labels: dict[str, dict] | None = None,
 ) -> dict:
+    """Box plot of `var`, one box per `group` level when grouping.
+
+    `pairwise` is an optional posthoc_block from a prior oneway. On a
+    grouped box plot it places a compact letter display above each box
+    (shared letter = not significantly different) — the same letters
+    the bar chart renders, read from the same comparisons. Box plots
+    are letters-only (`posthoc_viz` accepts nothing else): brackets
+    over box-and-whisker are visually unworkable. The no-group single
+    box ignores pairwise silently, same as bars.
+    """
     if var not in df.columns:
         raise KeyError(f"variable {var!r} not in dataset")
 
     if group and group in df.columns:
         labels = (value_labels or {}).get(group)
         traces = []
+        raw_keys: list[str] = []
+        xs: list[str] = []
+        tops: list[float] = []
+        lows: list[float] = []
         for i, (lvl, sub) in enumerate(_groupby_preserve_order(df, group)):
             s = pd.to_numeric(sub[var], errors="coerce").dropna()
+            label = _label_for(lvl, labels)
             traces.append({
                 "type": "box",
                 "y": s.tolist(),
-                "name": _label_for(lvl, labels),
+                "name": label,
                 "marker": {"color": _color_for(i)},
                 "boxmean": True,
             })
-        return {"data": traces, "layout": _layout(f"{var} by {group}", group, var)}
+            # Same parallel keying as bar_with_ci: raw str(level) for
+            # the CLD lookup, the displayed label for the axis.
+            raw_keys.append(str(lvl))
+            xs.append(label)
+            tops.append(float(s.max()) if len(s) else 0.0)
+            lows.append(float(s.min()) if len(s) else 0.0)
+        layout = _layout(f"{var} by {group}", group, var)
+        # Each box trace sits at its name on the category axis; lock
+        # the encounter order explicitly, like the bar chart does.
+        layout["xaxis"] = {**layout["xaxis"], "type": "category",
+                           "categoryorder": "array", "categoryarray": xs}
+        if pairwise and posthoc_viz == "letters":
+            annotations, caveat = _emit_letters(
+                raw_keys, xs, tops, pairwise,
+                bottom=min(lows) if lows else 0.0,
+            )
+            if annotations:
+                layout["annotations"] = annotations
+            if caveat:
+                layout["margin"] = {**layout["margin"], "b": 80}
+        return {"data": traces, "layout": layout}
 
     s = pd.to_numeric(df[var], errors="coerce").dropna()
     return {
@@ -388,6 +503,7 @@ def bar_with_ci(
     err: ErrSource = "ci95",
     ci: float = 0.95,
     pairwise: dict | None = None,
+    posthoc_viz: PosthocViz = "brackets",
     value_labels: dict[str, dict] | None = None,
 ) -> dict:
     """Bar chart of mean(`var`) per group, with optional sub-grouping.
@@ -400,10 +516,13 @@ def bar_with_ci(
     the canonical "8 milks × 3 timepoints" figure.
 
     `pairwise` is an optional posthoc_block (the dict shape produced by
-    oneway's _pairwise). When provided, significance brackets are
-    overlaid above the bars for any pair with `p_adj < 0.05`. Grouped
-    bars (subgroup set) skip brackets — the UI disables the toggle
-    there with an explanation; we also guard at the engine level.
+    oneway's _pairwise). When provided, `posthoc_viz` picks the render:
+    "brackets" (default) overlays significance brackets above pairs
+    with `p_adj < 0.05`; "letters" places a compact letter display
+    above each bar instead (shared letter = not significantly
+    different). Grouped bars (subgroup set) skip both — the UI
+    disables the toggle there with an explanation; we also guard at
+    the engine level.
     """
     if var not in df.columns:
         raise KeyError(f"variable {var!r} not in dataset")
@@ -454,11 +573,22 @@ def bar_with_ci(
     layout["xaxis"] = {**layout["xaxis"], "type": "category", "categoryorder": "array",
                        "categoryarray": xs}
     if pairwise:
-        shapes, annotations = _emit_brackets(raw_keys, xs, ys, errs, pairwise)
-        if shapes:
-            layout["shapes"] = shapes
-        if annotations:
-            layout["annotations"] = annotations
+        if posthoc_viz == "letters":
+            tops = [ys[i] + errs[i] for i in range(len(xs))]
+            annotations, caveat = _emit_letters(
+                raw_keys, xs, tops, pairwise,
+                bottom=min(ys) if ys else 0.0,
+            )
+            if annotations:
+                layout["annotations"] = annotations
+            if caveat:
+                layout["margin"] = {**layout["margin"], "b": 80}
+        else:
+            shapes, annotations = _emit_brackets(raw_keys, xs, ys, errs, pairwise)
+            if shapes:
+                layout["shapes"] = shapes
+            if annotations:
+                layout["annotations"] = annotations
     return {
         "data": [{
             "type": "bar",
@@ -466,7 +596,9 @@ def bar_with_ci(
             "y": ys,
             "error_y": {"type": "data", "array": errs, "visible": show_err,
                         "color": INFO, "thickness": 1.5, "width": 8},
-            "marker": {"color": ACCENT},
+            # One PALETTE color per category — Plotly accepts a color
+            # array matching the bars, same cycle the grouped traces use.
+            "marker": {"color": [_color_for(i) for i in range(len(xs))]},
         }],
         "layout": layout,
     }
@@ -789,7 +921,9 @@ def counts(
                 "type": "bar",
                 "x": x_axis_labels,
                 "y": ys,
-                "marker": {"color": ACCENT},
+                # Same per-category color cycle as the single-group bar
+                # chart — categorical levels are distinct, not one series.
+                "marker": {"color": [_color_for(i) for i in range(len(x_axis_labels))]},
             }],
             "layout": layout,
         }

@@ -276,6 +276,18 @@ def test_route_command_percent_ungrouped_no_suffix(client: TestClient,
     assert resp.json()["command"] == "graph bar (percent) q1_correct"
 
 
+def test_ungrouped_counts_cycle_marker_color_per_category(quiz_df: pd.DataFrame) -> None:
+    """Categorical levels are distinct — each bar gets its own PALETTE
+    color, same per-bar array convention as the single-group bar chart."""
+    from solarstata.engine.graphs import _color_for
+
+    fig = counts(quiz_df, "q1_correct")
+    color = fig["data"][0]["marker"]["color"]
+    assert isinstance(color, list)
+    assert len(color) == 2  # one entry per q1_correct level
+    assert color == [_color_for(i) for i in range(2)]
+
+
 def test_route_unknown_variable_400(client: TestClient, quiz_df: pd.DataFrame, tmp_path) -> None:
     _load_frame(client, quiz_df, tmp_path)
     resp = client.post("/api/graphs/counts", json={
