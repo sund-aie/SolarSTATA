@@ -73,6 +73,10 @@ class BarRequest(BaseModel):
     # How the posthoc comparisons render: brackets (default) or a
     # compact letter display. Consulted only when pairwise is present.
     posthoc_viz: Literal["brackets", "letters"] = "brackets"
+    # Clustered bars only (subgroup set): compute pairwise comparisons
+    # of the group means WITHIN each subgroup level (same _pairwise as
+    # oneway) and letter every bar. "none" leaves the chart bare.
+    posthoc_method: Literal["none", "bonferroni", "scheffe", "sidak"] = "none"
 
 
 class LineRequest(BaseModel):
@@ -138,7 +142,7 @@ def stats_bar(req: BarRequest, session: Session = Depends(get_session)) -> dict:
     try:
         fig = bar_with_ci(frame.df, req.var, group=req.group, subgroup=req.subgroup,
                           err=req.err, ci=req.ci, pairwise=req.pairwise,
-                          posthoc_viz=req.posthoc_viz,
+                          posthoc_viz=req.posthoc_viz, posthoc_method=req.posthoc_method,
                           value_labels=frame.value_labels)
     except KeyError as exc:
         raise HTTPException(status_code=400, detail=str(exc))

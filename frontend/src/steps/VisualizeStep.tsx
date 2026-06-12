@@ -402,24 +402,24 @@ export function SingleYForm({
   const [subgroup, setSubgroup] = useState("");
   const [err, setErr] = useState<ErrSource>("ci95");
   const [posthocViz, setPosthocViz] = useState<PosthocViz>("none");
+  const [posthocMethod, setPosthocMethod] = useState<ClusterMethod>("bonferroni");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Posthoc visualization — only on single-group charts AND only when
-  // the user has already run a matching oneway with posthoc enabled.
-  // Bar offers brackets or compact letters; box is letters-only
-  // (brackets over box-and-whisker are visually unworkable). We render
-  // what the engine already computed; no new statistics here.
+  // Posthoc visualization. Single-group charts render the comparisons
+  // a prior oneway already produced (brackets or letters on bar;
+  // letters only on box). Sub-grouped bars instead letter every bar
+  // from per-subgroup-level comparisons the bar endpoint computes with
+  // the same pairwise machinery — no prior run needed there.
   const analyzeRecords = useApp((s) => s.analyzeRecords);
   const matchingPosthoc: OnewayPosthocBlock | null = useMemo(
-    () => (varName && group
+    () => (varName && group && !subgroup
       ? lastOnewayPosthoc(analyzeRecords, varName, group)
       : null),
-    [varName, group, analyzeRecords],
+    [varName, group, subgroup, analyzeRecords],
   );
-  const posthocDisabledByGrouping = Boolean(subgroup);
-  const posthocActive = !!matchingPosthoc
-    && posthocViz !== "none" && !posthocDisabledByGrouping;
+  const clusterLetters = chart === "bar" && !!subgroup && posthocViz === "letters";
+  const posthocActive = !!matchingPosthoc && posthocViz !== "none" && !subgroup;
 
   const command = chart === "box"
     ? `graph box ${varName}${group ? `, over(${group})` : ""}`
@@ -456,7 +456,7 @@ export function SingleYForm({
       {chart === "bar" && (
         <ErrorBarRow value={err} onChange={setErr} />
       )}
-      {!matchingPosthoc && varName && group && (
+      {!matchingPosthoc && !subgroup && varName && group && (
         <FormRow label="Post-hoc display">
           <div className="text-[12px] text-text-muted italic leading-snug max-w-[420px]">
             {chart === "bar" ? "Significance brackets and compact letters" : "Compact letters"}{" "}
@@ -472,10 +472,7 @@ export function SingleYForm({
           method={matchingPosthoc.method}
           checked={posthocViz === "brackets"}
           onChange={(v) => setPosthocViz(v ? "brackets" : "none")}
-          disabled={posthocDisabledByGrouping}
-          disabledReason={posthocDisabledByGrouping
-            ? "Brackets apply to single-group comparisons."
-            : undefined}
+          disabled={false}
         />
       )}
       {matchingPosthoc && (
@@ -483,10 +480,17 @@ export function SingleYForm({
           method={matchingPosthoc.method}
           checked={posthocViz === "letters"}
           onChange={(v) => setPosthocViz(v ? "letters" : "none")}
-          disabled={posthocDisabledByGrouping}
-          disabledReason={posthocDisabledByGrouping
-            ? "Letters apply to single-group comparisons."
-            : undefined}
+          disabled={false}
+        />
+      )}
+      {chart === "bar" && subgroup && group && (
+        <ClusterLettersRow
+          group={group}
+          subgroup={subgroup}
+          checked={posthocViz === "letters"}
+          onChange={(v) => setPosthocViz(v ? "letters" : "none")}
+          method={posthocMethod}
+          onMethod={setPosthocMethod}
         />
       )}
       <RunButton command={command} busy={busy} disabled={!varName} onClick={async () => {
@@ -498,6 +502,10 @@ export function SingleYForm({
           if (posthocActive && matchingPosthoc) {
             body.pairwise = matchingPosthoc;
             body.posthoc_viz = posthocViz;
+          }
+          if (clusterLetters) {
+            body.posthoc_viz = "letters";
+            body.posthoc_method = posthocMethod;
           }
           const r = await api.graph(chart, body);
           onRendered({ kind: chart, command: r.command, figure: r.figure, timestamp: Date.now() });
@@ -595,6 +603,58 @@ export function LettersRow({
       {disabled && disabledReason && (
         <div className="text-[11px] text-text-muted italic mt-1">{disabledReason}</div>
       )}
+    </FormRow>
+  );
+}
+
+type ClusterMethod = "bonferroni" | "scheffe" | "sidak";
+
+const CLUSTER_METHOD_OPTIONS: { value: ClusterMethod; label: string }[] = [
+  { value: "bonferroni", label: "Bonferroni" },
+  { value: "scheffe",    label: "Scheffé" },
+  { value: "sidak",      label: "Šidák" },
+];
+
+/* Compact letters for sub-grouped (clustered) bars — every bar gets a
+ * letter comparing the group means WITHIN its sub-group level (the
+ * journal convention: e.g. compare materials within each timepoint).
+ * The bar endpoint computes these comparisons with the same pairwise
+ * machinery oneway uses, so no prior Analyze run is needed here.
+ * Exported for tests. */
+export function ClusterLettersRow({
+  group, subgroup, checked, onChange, method, onMethod,
+}: {
+  group: string;
+  subgroup: string;
+  checked: boolean;
+  onChange: (v: boolean) => void;
+  method: ClusterMethod;
+  onMethod: (m: ClusterMethod) => void;
+}) {
+  return (
+    <FormRow label="Compact letters">
+      <div className="space-y-2">
+        <label className="flex items-center gap-2 text-[13px] text-text">
+          <input
+            type="checkbox"
+            checked={checked}
+            onChange={(e) => onChange(e.target.checked)}
+          />
+          <span>
+            Letter every bar — <span className="font-mono">{group}</span> compared
+            within each <span className="font-mono">{subgroup}</span> level
+            (bars sharing a letter are <span className="font-mono">not</span>{" "}
+            significantly different at <span className="font-mono">p &lt; .05</span>)
+          </span>
+        </label>
+        {checked && (
+          <Select
+            value={method}
+            onChange={(v) => onMethod(v as ClusterMethod)}
+            options={CLUSTER_METHOD_OPTIONS}
+          />
+        )}
+      </div>
     </FormRow>
   );
 }

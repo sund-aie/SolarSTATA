@@ -45,8 +45,22 @@ group always reads "a…". A pair whose adjusted p could not be
 computed is treated as not significantly different and surfaces an
 under-plot caveat (and a widened bottom margin) instead of a
 silently invented result. The bar form offers Brackets and Letters
-as mutually exclusive toggles; grouped/clustered bars disable both
-with the single-factor explanation.
+as mutually exclusive toggles.
+
+Sub-grouped (clustered) bars letter every bar too — the journal
+convention for two-factor figures: within each sub-group level
+(e.g. each timepoint), the group means are compared pairwise with
+the same `_pairwise` machinery oneway uses (pooled within-cell
+error for that level, Bonferroni/Scheffé/Šidák adjusted) and
+lettered independently per level. The bar endpoint computes these
+on request (`posthoc_method`), so the clustered form needs no
+prior Analyze run; bar positions are exact because the gap
+geometry (`bargap`/`bargroupgap`) is pinned in the layout. Bars
+whose cell is empty get no letter; a not-computable level surfaces
+the shared caveat. Chart overlay ink (letters, bracket stars and
+lines) is now remapped to warm cream by the frontend theme layer
+in dark mode — previously it rendered near-black on the dark
+surface and was effectively invisible.
 
 ### Compact letters above box plots
 

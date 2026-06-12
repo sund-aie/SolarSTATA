@@ -39,6 +39,7 @@ from .cld import compact_letter_display
 
 ErrSource = Literal["none", "sd", "sem", "ci95"]
 PosthocViz = Literal["brackets", "letters"]
+PosthocMethod = Literal["none", "bonferroni", "scheffe", "sidak"]
 
 
 def _half_spread(s: pd.Series, *, err: ErrSource, ci: float) -> float:
@@ -504,6 +505,7 @@ def bar_with_ci(
     ci: float = 0.95,
     pairwise: dict | None = None,
     posthoc_viz: PosthocViz = "brackets",
+    posthoc_method: PosthocMethod = "none",
     value_labels: dict[str, dict] | None = None,
 ) -> dict:
     """Bar chart of mean(`var`) per group, with optional sub-grouping.
@@ -529,9 +531,13 @@ def bar_with_ci(
     if subgroup and subgroup not in df.columns:
         raise KeyError(f"subgroup variable {subgroup!r} not in dataset")
     if subgroup and group and group in df.columns:
-        # pairwise dropped here on purpose — brackets aren't meaningful
-        # over a two-factor clustered layout.
-        return _bar_grouped(df, var, group, subgroup, err, ci, value_labels)
+        # `pairwise` (a single-factor posthoc block) is dropped here on
+        # purpose — those comparisons pooled over the subgroup do not
+        # apply to clustered bars. Clustered letters come instead from
+        # `posthoc_method`: per-subgroup-level comparisons computed by
+        # the same _pairwise the oneway uses.
+        return _bar_grouped(df, var, group, subgroup, err, ci, value_labels,
+                            posthoc_method=posthoc_method, posthoc_viz=posthoc_viz)
     y_title = f"mean {var}{_err_suffix(err)}"
     show_err = err != "none"
     if not group or group not in df.columns:
@@ -604,8 +610,20 @@ def bar_with_ci(
     }
 
 
-def _bar_grouped(df, var, group, subgroup, err, ci, value_labels):
-    """Grouped bar: one trace per subgroup-level. X axis is grouped categories."""
+def _bar_grouped(df, var, group, subgroup, err, ci, value_labels,
+                 posthoc_method="none", posthoc_viz="letters"):
+    """Grouped bar: one trace per subgroup-level. X axis is grouped categories.
+
+    `posthoc_method` (none/bonferroni/scheffe/sidak) turns on a compact
+    letter display ABOVE EVERY BAR: within each subgroup level, the
+    group means are compared pairwise — the same `_pairwise` machinery
+    oneway uses, with the within-cell pooled error for that subgroup
+    level — and bars sharing a letter within a subgroup level are not
+    significantly different at strict p < .05. This is the journal
+    convention for two-factor bar figures (e.g. compare the materials
+    within each timepoint). Letters are the only posthoc render here;
+    brackets over clustered bars are unworkable.
+    """
     sub_labels = (value_labels or {}).get(subgroup)
     group_labels = (value_labels or {}).get(group)
     show_err = err != "none"
@@ -620,24 +638,35 @@ def _bar_grouped(df, var, group, subgroup, err, ci, value_labels):
             group_levels.append(lvl)
 
     traces = []
+    cells: list[list[np.ndarray | None]] = []  # [sub][group] raw values
+    tops: list[list[float | None]] = []        # [sub][group] bar + err tip
     for i, sub_lvl in enumerate(sub_levels):
         sub_df = df[df[subgroup] == sub_lvl]
         xs: list[str] = []
         ys: list[float] = []
         errs: list[float] = []
+        cell_row: list[np.ndarray | None] = []
+        top_row: list[float | None] = []
         for grp_lvl in group_levels:
             cell = pd.to_numeric(
                 sub_df.loc[sub_df[group] == grp_lvl, var],
                 errors="coerce",
             ).dropna()
+            xs.append(_label_for(grp_lvl, group_labels))
             if cell.empty:
-                xs.append(_label_for(grp_lvl, group_labels))
                 ys.append(float("nan"))
                 errs.append(0.0)
+                cell_row.append(None)
+                top_row.append(None)
                 continue
-            xs.append(_label_for(grp_lvl, group_labels))
-            ys.append(float(cell.mean()))
-            errs.append(_half_spread(cell, err=err, ci=ci))
+            m = float(cell.mean())
+            half = _half_spread(cell, err=err, ci=ci)
+            ys.append(m)
+            errs.append(half)
+            cell_row.append(cell.to_numpy())
+            top_row.append(m + half)
+        cells.append(cell_row)
+        tops.append(top_row)
         traces.append({
             "type": "bar",
             "name": _label_for(sub_lvl, sub_labels),
@@ -654,9 +683,107 @@ def _bar_grouped(df, var, group, subgroup, err, ci, value_labels):
         f"mean {var}{_err_suffix(err)}",
     )
     layout["barmode"] = "group"
+    # Pin the gap geometry explicitly (these are the plotly.js defaults)
+    # so the letter x-offsets below are exact, not default-dependent.
+    layout["bargap"] = 0.2
+    layout["bargroupgap"] = 0.0
     layout["xaxis"] = {**layout["xaxis"], "type": "category", "categoryorder": "array",
                        "categoryarray": [_label_for(g, group_labels) for g in group_levels]}
+
+    if posthoc_method != "none" and posthoc_viz == "letters" and len(group_levels) >= 2:
+        annotations, caveat = _emit_grouped_letters(
+            group_levels, sub_levels, cells, tops, method=posthoc_method,
+        )
+        if annotations:
+            layout["annotations"] = annotations
+        if caveat:
+            layout["margin"] = {**layout["margin"], "b": 80}
     return {"data": traces, "layout": layout}
+
+
+def _emit_grouped_letters(
+    group_levels: list,
+    sub_levels: list,
+    cells: list[list[np.ndarray | None]],
+    tops: list[list[float | None]],
+    *,
+    method: str,
+) -> tuple[list[dict], bool]:
+    """Compact letters for a clustered bar chart, one per bar.
+
+    For each subgroup level j the group means are compared with
+    anova._pairwise (pooled within-cell error for that level only) and
+    lettered independently — letters answer "which groups differ
+    WITHIN this subgroup level", never across levels. Bars whose cell
+    is empty get no letter. Pairs whose adjusted p could not be
+    computed are treated as not significantly different and surface
+    the shared caveat, exactly like the single-factor letters.
+
+    On a category axis Plotly accepts fractional numeric x, so each
+    letter sits at its bar's center: category i, trace j of M, with
+    the bargap geometry pinned by the caller (bargap 0.2 → usable
+    width 0.8 per category).
+    """
+    from .anova import _pairwise
+
+    avail = 0.8  # 1 − bargap, pinned in _bar_grouped
+    n_sub = len(sub_levels)
+
+    flat_tops = [t for row in tops for t in row if t is not None]
+    if not flat_tops:
+        return [], False
+    overall_top = max(flat_tops)
+    flat_means = [float(c.mean()) for row in cells for c in row if c is not None]
+    overall_bottom = min(min(flat_means), 0.0) if flat_means else 0.0
+    # Same step math as _emit_letters so the two letter renders agree.
+    span = max(overall_top - overall_bottom, abs(overall_top), 1.0)
+    step = span * 0.08
+
+    annotations: list[dict] = []
+    n_missing_total = 0
+    for j in range(n_sub):
+        present = [i for i, c in enumerate(cells[j]) if c is not None]
+        if len(present) < 2:
+            continue  # nothing to compare within this subgroup level
+        names = [str(group_levels[i]) for i in present]
+        samples = [cells[j][i] for i in present]
+        n_total = sum(len(s) for s in samples)
+        df_within = n_total - len(samples)
+        ss_within = sum(float(((s - s.mean()) ** 2).sum()) for s in samples)
+        ms_within = ss_within / df_within if df_within > 0 else None
+        block = _pairwise(samples, names, method=method,
+                          df_within=df_within, ms_within=ms_within)
+        letters, n_missing = compact_letter_display(names, block["comparisons"])
+        n_missing_total += n_missing
+        for name, i in zip(names, present):
+            text = letters.get(name, "")
+            top = tops[j][i]
+            if not text or top is None:
+                continue
+            annotations.append({
+                "x": i - avail / 2 + avail * (j + 0.5) / n_sub,
+                "y": top + step * 0.35,
+                "xref": "x", "yref": "y",
+                "text": text,
+                "showarrow": False,
+                "font": {"family": "Geist Mono, monospace", "size": 13,
+                         "color": "rgba(0,0,0,0.75)"},
+                "xanchor": "center",
+                "yanchor": "bottom",
+            })
+
+    caveat = n_missing_total > 0
+    if caveat:
+        annotations.append({
+            "x": 0.0, "y": -0.22,
+            "xref": "paper", "yref": "paper",
+            "text": CAVEAT_TEXT,
+            "showarrow": False,
+            "font": {"family": "Geist, sans-serif", "size": 11, "color": CAVEAT},
+            "xanchor": "left",
+            "yanchor": "top",
+        })
+    return annotations, caveat
 
 
 # ===================================================================

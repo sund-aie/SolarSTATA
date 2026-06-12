@@ -5,7 +5,7 @@
  * bar form. */
 
 import { afterEach, describe, expect, it } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { SingleYForm } from "../src/steps/VisualizeStep";
 import { useApp } from "../src/state/store";
 import type { AnalyzeRecord, ColumnInfo, OnewayResponse } from "../src/lib/types";
@@ -134,6 +134,32 @@ describe("box form compact letters", () => {
       screen.queryByText(/appear here after you run a one-way ANOVA/),
     ).not.toBeInTheDocument();
     expect(screen.getByText("Compact letters")).toBeInTheDocument();
+  });
+
+  it("sub-grouped bars get an enabled cluster-letters control with a method picker", () => {
+    const cats = [...CATEGORICALS, col("timepoint_label", "categorical", "object")];
+    render(
+      <SingleYForm chart="bar" numerics={NUMERICS} categoricals={cats}
+                   onRendered={() => {}} />,
+    );
+    // Pick a sub-group: comboboxes are Variable / Group by / Sub-group / Error bars.
+    const subgroupSelect = screen.getAllByRole("combobox")[2] as HTMLSelectElement;
+    fireEvent.change(subgroupSelect, { target: { value: "timepoint_label" } });
+
+    // The clustered control is live — no prior ANOVA required, no
+    // "run a one-way first" hint, no disabled state.
+    expect(screen.getByText("Compact letters")).toBeInTheDocument();
+    expect(screen.getByText(/Letter every bar/)).toBeInTheDocument();
+    expect(
+      screen.queryByText(/appear here after you run a one-way ANOVA/),
+    ).not.toBeInTheDocument();
+    const checkbox = screen.getByRole("checkbox") as HTMLInputElement;
+    expect(checkbox.disabled).toBe(false);
+
+    // Method picker appears once letters are on.
+    fireEvent.click(checkbox);
+    expect(screen.getByText("Bonferroni")).toBeInTheDocument();
+    expect(screen.getByText("Scheffé")).toBeInTheDocument();
   });
 
   it("bar form still offers both brackets and letters", () => {

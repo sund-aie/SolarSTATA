@@ -266,6 +266,110 @@ def test_ungrouped_and_subgrouped_bars_skip_letters(four_groups_df: pd.DataFrame
 
 
 # ---------------------------------------------------------------------------
+# Clustered bars — letters per bar, comparing groups WITHIN each subgroup
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def clustered_df() -> pd.DataFrame:
+    """4 materials × 2 timepoints, means far apart within each timepoint
+    so every within-timepoint pair is significant."""
+    rng = np.random.default_rng(seed=23)
+    rows = []
+    for t in ("pre", "post"):
+        for g, mean in [("A", 10.0), ("B", 20.0), ("C", 30.0), ("D", 40.0)]:
+            for _ in range(12):
+                rows.append({"y": rng.normal(mean, 1.0), "g": g, "t": t})
+    return pd.DataFrame(rows)
+
+
+def test_clustered_letters_one_per_bar_at_exact_offsets(clustered_df: pd.DataFrame) -> None:
+    fig = bar_with_ci(clustered_df, "y", group="g", subgroup="t",
+                      posthoc_viz="letters", posthoc_method="bonferroni")
+    annotations = fig["layout"]["annotations"]
+    assert len(annotations) == 8  # 4 groups × 2 timepoints
+    # bargap geometry is pinned, so positions are exact: category i,
+    # trace j of 2 → x = i − 0.4 + 0.8·(j + 0.5)/2.
+    assert fig["layout"]["bargap"] == 0.2
+    expected_x = sorted(i - 0.4 + 0.8 * (j + 0.5) / 2 for j in range(2) for i in range(4))
+    assert sorted(a["x"] for a in annotations) == pytest.approx(expected_x)
+    for a in annotations:
+        assert a["font"] == {"family": "Geist Mono, monospace", "size": 13,
+                             "color": "rgba(0,0,0,0.75)"}
+
+
+def test_clustered_letters_compare_within_each_subgroup_level(
+    clustered_df: pd.DataFrame,
+) -> None:
+    """All pairs significant within each timepoint → a/b/c/d twice, and
+    each letter set is independent per timepoint (both start at 'a')."""
+    fig = bar_with_ci(clustered_df, "y", group="g", subgroup="t",
+                      posthoc_viz="letters", posthoc_method="bonferroni")
+    by_trace: dict[int, list[str]] = {0: [], 1: []}
+    for a in fig["layout"]["annotations"]:
+        j = 0 if (a["x"] - round(a["x"])) < 0 else 1  # left/right bar of the pair
+        by_trace[j].append(a["text"])
+    assert sorted(by_trace[0]) == ["a", "b", "c", "d"]
+    assert sorted(by_trace[1]) == ["a", "b", "c", "d"]
+
+
+def test_clustered_letters_share_iff_not_significant_per_level() -> None:
+    """Mixed effects: A≠B at pre, A~B at post — letters must flip
+    between the two timepoints accordingly."""
+    rng = np.random.default_rng(seed=20)  # p_pre ≈ 1e-22, p_post ≈ .98
+    rows = []
+    for g, pre_mean, post_mean in [("A", 10.0, 15.0), ("B", 20.0, 15.0)]:
+        for _ in range(15):
+            rows.append({"y": rng.normal(pre_mean, 1.0), "g": g, "t": "pre"})
+            rows.append({"y": rng.normal(post_mean, 1.0), "g": g, "t": "post"})
+    fig = bar_with_ci(pd.DataFrame(rows), "y", group="g", subgroup="t",
+                      posthoc_viz="letters", posthoc_method="bonferroni")
+    annotations = fig["layout"]["annotations"]
+    assert len(annotations) == 4
+    pre = [a["text"] for a in annotations if (a["x"] - round(a["x"])) < 0]
+    post = [a["text"] for a in annotations if (a["x"] - round(a["x"])) > 0]
+    assert pre == ["a", "b"]      # significantly different at pre
+    assert post == ["a", "a"]     # not significantly different at post
+
+
+def test_clustered_letters_skip_empty_cells() -> None:
+    rng = np.random.default_rng(seed=31)
+    rows = []
+    for g, mean in [("A", 10.0), ("B", 20.0), ("C", 30.0)]:
+        for t in ("pre", "post"):
+            if g == "C" and t == "post":
+                continue  # C never measured at post
+            for _ in range(10):
+                rows.append({"y": rng.normal(mean, 1.0), "g": g, "t": t})
+    fig = bar_with_ci(pd.DataFrame(rows), "y", group="g", subgroup="t",
+                      posthoc_viz="letters", posthoc_method="bonferroni")
+    # 3 bars at pre + 2 at post — the missing C/post bar gets no letter.
+    assert len(fig["layout"]["annotations"]) == 5
+
+
+def test_clustered_default_method_none_stays_bare(clustered_df: pd.DataFrame) -> None:
+    fig = bar_with_ci(clustered_df, "y", group="g", subgroup="t")
+    assert fig["layout"].get("annotations", []) == []
+    assert fig["layout"].get("shapes", []) == []
+
+
+def test_clustered_not_computable_level_emits_caveat() -> None:
+    """A timepoint where every group has one observation has no within
+    error term — its pairs are not computable, so the caveat shows and
+    no result is invented (the affected bars share a letter)."""
+    rng = np.random.default_rng(seed=37)
+    rows = []
+    for g, mean in [("A", 10.0), ("B", 20.0)]:
+        rows.append({"y": mean, "g": g, "t": "single"})  # n=1 cells
+        for _ in range(10):
+            rows.append({"y": rng.normal(mean, 1.0), "g": g, "t": "full"})
+    fig = bar_with_ci(pd.DataFrame(rows), "y", group="g", subgroup="t",
+                      posthoc_viz="letters", posthoc_method="bonferroni")
+    caveats = [a for a in fig["layout"]["annotations"] if a["text"] == CAVEAT_TEXT]
+    assert len(caveats) == 1
+    assert fig["layout"]["margin"]["b"] == 80
+
+
+# ---------------------------------------------------------------------------
 # Box rendering — same letters, box tops instead of bar tops
 # ---------------------------------------------------------------------------
 
